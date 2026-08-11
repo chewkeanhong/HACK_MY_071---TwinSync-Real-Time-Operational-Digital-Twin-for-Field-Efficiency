@@ -1,0 +1,274 @@
+/* TwinSync dashboard.
+   Committed single dark theme: this is an operations wall display, and the 3D scene is
+   lit for a dark ground. Every colour is stated explicitly rather than inherited. */
+
+:root {
+  --bg:        #05070d;
+  --surface:   rgba(13, 17, 27, 0.88);
+  --surface-2: rgba(22, 28, 42, 0.72);
+  --border:    rgba(120, 140, 180, 0.18);
+
+  /* Text wears ink tokens, never a status colour. */
+  --ink:       #e8edf7;
+  --ink-2:     #9aa7bd;
+  --ink-3:     #6b7789;
+
+  /* Status palette — reserved, never reused as decoration. */
+  --good:      #3fb950;
+  --warn:      #d29922;
+  --crit:      #f85149;
+  --route:     #58a6ff;
+
+  --mono: ui-monospace, "SF Mono", "Cascadia Mono", Menlo, Consolas, monospace;
+  --sans: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0; padding: 0; height: 100%;
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--sans);
+  overflow: hidden;
+}
+
+#map { position: fixed; inset: 0; background: var(--bg); }
+canvas { outline: none; }
+
+/* ---------------------------------------------------------------- top bar */
+
+.bar {
+  position: fixed; top: 0; left: 0; right: 0; height: 58px;
+  display: flex; align-items: center; gap: 24px;
+  padding: 0 18px;
+  background: linear-gradient(180deg, rgba(5,7,13,0.95), rgba(5,7,13,0.55));
+  border-bottom: 1px solid var(--border);
+  z-index: 10;
+}
+
+.brand { display: flex; align-items: center; gap: 11px; }
+.brand .mark {
+  width: 11px; height: 11px; border-radius: 2px;
+  background: var(--good);
+  box-shadow: 0 0 12px rgba(63,185,80,0.75);
+}
+.brand h1 {
+  margin: 0; font-size: 15px; font-weight: 650; letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+.sub { margin: 1px 0 0; font-size: 11px; color: var(--ink-3); }
+
+.clock { display: flex; flex-direction: column; line-height: 1.15; }
+.clock .label {
+  font-size: 9px; text-transform: uppercase; letter-spacing: 0.13em; color: var(--ink-3);
+}
+.clock .value { font-family: var(--mono); font-size: 19px; font-variant-numeric: tabular-nums; }
+
+.controls { margin-left: auto; display: flex; align-items: center; gap: 8px; }
+
+button {
+  font: inherit; font-size: 11px; letter-spacing: 0.05em;
+  color: var(--ink-2); background: var(--surface-2);
+  border: 1px solid var(--border); border-radius: 6px;
+  padding: 6px 12px; cursor: pointer;
+  transition: color .12s, border-color .12s, background .12s;
+}
+button:hover { color: var(--ink); border-color: rgba(120,140,180,0.42); }
+button.on { color: var(--bg); background: var(--ink); border-color: var(--ink); }
+
+/* Segmented view-mode control -- one control, three exclusive states, so the current
+   view is always readable at a glance rather than inferred from a toggle's label. */
+.seg { display: flex; border: 1px solid var(--border); border-radius: 6px; overflow: hidden; }
+.seg-btn { border: none; border-radius: 0; background: var(--surface-2); padding: 6px 13px; }
+.seg-btn + .seg-btn { border-left: 1px solid var(--border); }
+.seg-btn.on { color: var(--bg); background: var(--ink); }
+.seg-btn.on:hover { color: var(--bg); }
+
+.conn {
+  font-family: var(--mono); font-size: 10px; color: var(--ink-3);
+  padding-left: 8px; border-left: 1px solid var(--border);
+}
+.conn.live { color: var(--good); }
+.conn.lost { color: var(--crit); }
+
+/* -------------------------------------------------------------------- KPIs */
+
+.kpis {
+  position: fixed; top: 70px; left: 50%; transform: translateX(-50%);
+  display: flex; gap: 10px; z-index: 9;
+}
+.kpi {
+  min-width: 152px;
+  display: flex; flex-direction: column; gap: 2px;
+  padding: 9px 14px;
+  background: var(--surface); backdrop-filter: blur(9px);
+  border: 1px solid var(--border); border-radius: 9px;
+}
+.k-label {
+  font-size: 9px; text-transform: uppercase; letter-spacing: 0.12em; color: var(--ink-3);
+}
+.k-label em { font-style: normal; color: var(--ink-2); }
+.k-value {
+  font-family: var(--mono); font-size: 23px; font-variant-numeric: tabular-nums;
+  line-height: 1.05;
+}
+.k-note { font-size: 10px; color: var(--ink-3); }
+/* Status only ever lands on the number, and the note says why in words. */
+.kpi.alert .k-value { color: var(--crit); }
+.kpi.warn  .k-value { color: var(--warn); }
+
+/* ------------------------------------------------------------------ panels */
+
+.panel {
+  position: fixed; bottom: 42px;
+  width: 306px; max-height: 47vh;
+  display: flex; flex-direction: column;
+  background: var(--surface); backdrop-filter: blur(9px);
+  border: 1px solid var(--border); border-radius: 10px;
+  z-index: 9;
+}
+.panel-left  { left: 14px; }
+.panel-right { right: 14px; }
+
+.panel h2 {
+  margin: 0; padding: 10px 13px 8px;
+  font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.13em;
+  color: var(--ink-2); border-bottom: 1px solid var(--border);
+  display: flex; justify-content: space-between; align-items: baseline;
+}
+.panel h2.crews-head { border-top: 1px solid var(--border); }
+.hint { font-size: 9px; letter-spacing: 0.05em; color: var(--ink-3); text-transform: none; }
+
+.scroll { overflow-y: auto; padding: 6px; }
+.scroll::-webkit-scrollbar { width: 7px; }
+.scroll::-webkit-scrollbar-thumb { background: rgba(120,140,180,0.24); border-radius: 4px; }
+
+.empty { margin: 10px 8px; font-size: 11px; color: var(--ink-3); }
+
+/* incidents */
+.inc {
+  padding: 8px 9px; margin-bottom: 5px;
+  background: var(--surface-2); border-radius: 7px;
+  border-left: 2px solid var(--warn);
+  cursor: pointer;
+}
+.inc.down { border-left-color: var(--crit); }
+.inc:hover { background: rgba(38,46,66,0.8); }
+.inc-top { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
+.inc-id { font-family: var(--mono); font-size: 11px; color: var(--ink); }
+.inc-pri {
+  font-family: var(--mono); font-size: 10px; color: var(--ink-2);
+  background: rgba(120,140,180,0.14); border-radius: 4px; padding: 1px 5px;
+}
+.inc-row { margin-top: 3px; font-size: 10px; color: var(--ink-2); }
+.inc-row .n { font-family: var(--mono); color: var(--ink); }
+.inc-crit { margin-top: 3px; font-size: 10px; color: var(--warn); }
+.inc-2d { margin-top: 3px; font-size: 10px; color: var(--warn); font-style: italic; }
+.inc-sla  { margin-top: 3px; font-size: 10px; color: var(--ink-3); }
+.inc-sla.breach { color: var(--crit); }
+
+/* crews */
+.crewlist { padding: 7px 9px 9px; display: flex; flex-direction: column; gap: 5px; }
+.crew { display: flex; align-items: center; gap: 7px; font-size: 11px; }
+.crew .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--ink-3); flex: none; }
+.crew .dot.en_route { background: var(--route); }
+.crew .dot.on_site  { background: var(--warn); }
+.crew .nm { color: var(--ink-2); min-width: 54px; }
+.crew .st { font-family: var(--mono); font-size: 10px; color: var(--ink-3); margin-left: auto; }
+
+/* log */
+.log { font-family: var(--mono); font-size: 10px; line-height: 1.5; }
+.log div { padding: 2px 5px; border-bottom: 1px solid rgba(120,140,180,0.07); color: var(--ink-2); }
+.log .t { color: var(--ink-3); margin-right: 6px; }
+.log .edge   { color: var(--warn); }
+.log .impact { color: var(--crit); }
+.log .ok     { color: var(--good); }
+
+/* ------------------------------------------------------------------ legend */
+
+.legend {
+  position: fixed; bottom: 0; left: 0; right: 0; height: 32px;
+  display: flex; align-items: center; gap: 16px; padding: 0 16px;
+  font-size: 10px; color: var(--ink-3);
+  background: rgba(5,7,13,0.9); border-top: 1px solid var(--border);
+  z-index: 10;
+}
+.legend span { display: flex; align-items: center; gap: 5px; }
+.legend .spacer { flex: 1; }
+.sw { width: 9px; height: 9px; border-radius: 2px; display: inline-block; }
+
+/* deck.gl tooltip */
+.deck-tooltip {
+  font-family: var(--sans) !important; font-size: 11px !important;
+  background: var(--surface) !important; color: var(--ink) !important;
+  border: 1px solid var(--border) !important; border-radius: 7px !important;
+  padding: 8px 10px !important;
+}
+
+@media (max-width: 1100px) {
+  .kpis { position: static; transform: none; flex-wrap: wrap; padding: 66px 14px 0; }
+  .panel { max-height: 34vh; width: 262px; }
+}
+
+
+/* ------------------------------------------------- side-by-side comparison */
+
+.split-labels { position: fixed; inset: 0; pointer-events: none; z-index: 8; }
+.split-labels[hidden] { display: none; }
+
+.sl {
+  position: absolute; top: 148px;
+  padding: 10px 14px;
+  background: var(--surface); backdrop-filter: blur(9px);
+  border: 1px solid var(--border); border-radius: 9px;
+}
+
+/* Side by side: one caption per pane, each over its own half. */
+body.mode-split .sl { width: 44%; }
+body.mode-split .sl-left  { left: 3%; }
+body.mode-split .sl-right { right: 3%; text-align: right; }
+
+/* 2D on its own gets a caption, because a flat map with circles on it needs saying
+   out loud that this is the model being critiqued. 3D on its own gets none: it is the
+   default hero view and the KPI row already labels it, so a caption is just clutter
+   (the whole overlay is hidden in that mode). */
+body.mode-2d .sl-right,
+body.mode-2d .sl-divider,
+body.mode-2d .sl-verdict { display: none; }
+body.mode-2d .sl-left { left: 14px; right: auto; width: 306px; text-align: left; }
+
+.sl-tag {
+  display: inline-block; font-size: 9px; letter-spacing: 0.16em;
+  text-transform: uppercase; color: var(--ink-3);
+  border: 1px solid var(--border); border-radius: 4px; padding: 2px 7px;
+}
+/* The status colour marks which side is the real answer; the label says so in words. */
+.sl-tag.on { color: var(--good); border-color: rgba(63,185,80,0.45); }
+
+.sl h3 {
+  margin: 7px 0 3px; font-size: 14px; font-weight: 600; letter-spacing: 0.02em;
+}
+.sl p { margin: 0; font-size: 12px; color: var(--ink-2); }
+.sl p b { font-family: var(--mono); font-size: 15px; color: var(--ink); }
+/* Both panes report the same quantity, so both wear the same status colour; the
+   difference between them is the point, not a difference in kind. */
+.sl p b { color: var(--crit); }
+.sl-note { margin-top: 3px !important; font-size: 10px; color: var(--ink-3); font-style: italic; }
+
+/* A hairline seam so the two cameras read as two panes, not one wide picture. */
+.sl-divider {
+  position: absolute; left: 50%; top: 100px; bottom: 42px; width: 1px;
+  background: linear-gradient(180deg,
+    transparent, rgba(120,140,180,0.38) 12%, rgba(120,140,180,0.38) 88%, transparent);
+}
+
+.sl-verdict {
+  position: absolute; left: 50%; transform: translateX(-50%); bottom: 52px;
+  padding: 7px 16px; font-size: 12px; letter-spacing: 0.03em;
+  color: var(--ink); background: var(--surface); backdrop-filter: blur(9px);
+  border: 1px solid var(--border); border-radius: 20px;
+}
+
+/* In split mode the side panels would sit on top of the panes; tuck them down. */
+body.split .panel { max-height: 30vh; }

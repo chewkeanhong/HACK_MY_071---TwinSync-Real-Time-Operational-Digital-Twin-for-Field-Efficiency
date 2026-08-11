@@ -1,0 +1,71 @@
+{
+  "name": "KL CBD -- three-act incident timeline",
+  "seed": 42,
+  "duration_s": 3600.0,
+  "sample_hz": 5.0,
+  "nominal_sample_hz": 10.0,
+  "digest_period_s": 10.0,
+  "baseline_detection_delay_s": 600.0,
+  "sla_minutes": 60.0,
+  "crews": [
+    {
+      "id": "CREW-A",
+      "name": "Alpha",
+      "lon": 101.7076237,
+      "lat": 3.1429934
+    },
+    {
+      "id": "CREW-B",
+      "name": "Bravo",
+      "lon": 101.7254928,
+      "lat": 3.1435736
+    },
+    {
+      "id": "CREW-C",
+      "name": "Charlie",
+      "lon": 101.70811,
+      "lat": 3.1590935
+    },
+    {
+      "id": "CREW-D",
+      "name": "Delta",
+      "lon": 101.7249374,
+      "lat": 3.158508
+    }
+  ],
+  "faults": [
+    {
+      "tower": "KL-03",
+      "profile": "amplifier_degradation",
+      "start_s": 180.0,
+      "note": "Act 1: a rooftop amplifier starts cooking. The edge catches the drift; the 3D shadow shows who really went dark."
+    },
+    {
+      "tower": "KL-13",
+      "profile": "antenna_misalignment",
+      "start_s": 330.0,
+      "note": "Act 2: a second, smaller fault 1.7 minutes' drive from KL-03, while the crew is still en route -- folded into the same trip."
+    },
+    {
+      "tower": "KL-09",
+      "profile": "backhaul_congestion",
+      "start_s": 700.0,
+      "note": "Act 3: a third fault occupies the remaining crew, so the fleet is fully committed when the big one lands."
+    },
+    {
+      "tower": "KL-06",
+      "profile": "power_failure",
+      "start_s": 1150.0,
+      "note": "Act 4: the transit-hub site loses power entirely -- 157,000 subscribers. Every crew is busy, so it preempts."
+    }
+  ],
+  "congestion": [
+    {
+      "factor": 4.5,
+      "highway": "secondary",
+      "near_tower": "KL-03",
+      "radius_m": 700.0,
+      "note": "rush-hour jam on the secondary arterials around the first fault"
+    }
+  ]
+}

@@ -1,0 +1,117 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TwinSync — KL CBD Operational Twin</title>
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+
+<div id="map"></div>
+
+<!-- Top bar: identity, clock, controls -->
+<header class="bar">
+  <div class="brand">
+    <span class="mark"></span>
+    <div>
+      <h1>TwinSync</h1>
+      <p class="sub" id="aoi">Kuala Lumpur CBD · loading…</p>
+    </div>
+  </div>
+
+  <div class="clock">
+    <span class="label">scenario time</span>
+    <span class="value" id="clock">00:00</span>
+  </div>
+
+  <div class="controls">
+    <button id="btn-pause" title="Pause the simulation">Pause</button>
+    <button id="btn-reset" title="Restart the scenario">Reset</button>
+    <div class="seg" role="group" aria-label="View mode">
+      <button id="btn-view-2d" class="seg-btn"
+              title="The flat coverage map, as dispatch draws it today (1)">2D</button>
+      <button id="btn-view-3d" class="seg-btn on"
+              title="True line of sight against the extruded city (2)">3D</button>
+      <button id="btn-view-split" class="seg-btn"
+              title="Both models side by side, same instant (3)">Compare</button>
+    </div>
+    <span class="conn" id="conn">connecting…</span>
+  </div>
+</header>
+
+<!-- KPI row -->
+<section class="kpis" id="kpis">
+  <div class="kpi">
+    <span class="k-label">subscribers dark</span>
+    <span class="k-value" id="kpi-subs">0</span>
+    <span class="k-note" id="kpi-subs-note">all sites nominal</span>
+  </div>
+  <div class="kpi">
+    <span class="k-label">buildings dark <em>(3D)</em></span>
+    <span class="k-value" id="kpi-dark">0</span>
+    <span class="k-note" id="kpi-dark-note">2D radius would say —</span>
+  </div>
+  <div class="kpi">
+    <span class="k-label">edge uplink saved</span>
+    <span class="k-value" id="kpi-uplink">—</span>
+    <span class="k-note" id="kpi-uplink-note">events, not raw telemetry</span>
+  </div>
+  <div class="kpi">
+    <span class="k-label">open incidents</span>
+    <span class="k-value" id="kpi-open">0</span>
+    <span class="k-note" id="kpi-open-note">crews idle</span>
+  </div>
+</section>
+
+<!-- Side-by-side comparison labels, shown only in split mode -->
+<div class="split-labels" id="split-labels" hidden>
+  <div class="sl sl-left">
+    <span class="sl-tag">TODAY</span>
+    <h3>2D coverage model</h3>
+    <p><b id="sl-2d-b">0</b> buildings dark &middot; <b id="sl-2d-s">0</b> subscribers</p>
+    <p class="sl-note">overlapping circles &rarr; &ldquo;the next cell has them&rdquo;</p>
+  </div>
+  <div class="sl-divider"></div>
+  <div class="sl sl-right">
+    <span class="sl-tag on">TWINSYNC</span>
+    <h3>3D line of sight</h3>
+    <p><b id="sl-3d-b">0</b> buildings dark &middot; <b id="sl-3d-s">0</b> subscribers</p>
+    <p class="sl-note">a 200 m tower is in the way</p>
+  </div>
+  <div class="sl-verdict" id="sl-verdict">waiting for a fault&hellip;</div>
+</div>
+
+<!-- Incident queue, ranked by impact -->
+<aside class="panel panel-left">
+  <h2>Incident queue <span class="hint">ranked by impact</span></h2>
+  <div id="incidents" class="scroll">
+    <p class="empty">No open incidents.</p>
+  </div>
+
+  <h2 class="crews-head">Crews</h2>
+  <div id="crews" class="crewlist"></div>
+</aside>
+
+<!-- Event log -->
+<aside class="panel panel-right">
+  <h2>Edge &amp; dispatch log</h2>
+  <div id="log" class="scroll log"></div>
+</aside>
+
+<!-- Legend -->
+<footer class="legend">
+  <span><i class="sw" style="background:#3fb950"></i>healthy</span>
+  <span><i class="sw" style="background:#d29922"></i>degraded</span>
+  <span><i class="sw" style="background:#f85149"></i>down</span>
+  <span><i class="sw" style="background:#8b3a3a"></i>building dark</span>
+  <span><i class="sw" style="background:#58a6ff"></i>crew route (3D, street graph)</span>
+  <span><i class="sw" style="background:#967828"></i>bearing (2D, straight line)</span>
+  <span class="spacer"></span>
+  <span id="height-note">building heights: OSM where tagged, imputed elsewhere</span>
+</footer>
+
+<script src="/vendor/deck.gl.min.js"></script>
+<script src="/app.js"></script>
+</body>
+</html>

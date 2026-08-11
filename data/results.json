@@ -1,0 +1,38 @@
+{
+  "baseline": {
+    "label": "today",
+    "incidents_raised": 4,
+    "incidents_resolved": 3,
+    "mttr_minutes": 40.3,
+    "mean_detection_minutes": 10.0,
+    "truck_rolls": 4,
+    "truck_rolls_saved": 0,
+    "reassignments": 0,
+    "subscriber_minutes_lost": 443766,
+    "subscribers_restored": 10995,
+    "sla_breaches": 0,
+    "raw_bytes": 64800000,
+    "uplink_bytes": 963900,
+    "uplink_reduction": 0.9851
+  },
+  "twinsync": {
+    "label": "TwinSync",
+    "incidents_raised": 4,
+    "incidents_resolved": 3,
+    "mttr_minutes": 35.7,
+    "mean_detection_minutes": 0.05,
+    "truck_rolls": 3,
+    "truck_rolls_saved": 1,
+    "reassignments": 0,
+    "subscriber_minutes_lost": 400275,
+    "subscribers_restored": 10995,
+    "sla_breaches": 0,
+    "raw_bytes": 64800000,
+    "uplink_bytes": 964800,
+    "uplink_reduction": 0.9851
+  },
+  "mttr_improvement_pct": 11.2,
+  "subscriber_minutes_saved": 43491,
+  "truck_rolls_avoided": 1,
+  "sla_breaches_avoided": 0
+}
