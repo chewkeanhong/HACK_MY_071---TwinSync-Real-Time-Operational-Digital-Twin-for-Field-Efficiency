@@ -1,0 +1,70 @@
+{
+  "model": "edge-anomaly-autoencoder-v1",
+  "created": "2026-08-29T03:38:10+00:00",
+  "input_name": "z_scores",
+  "input_features": [
+    "rssi_dbm",
+    "throughput_mbps",
+    "temperature_c",
+    "power_draw_w",
+    "vswr",
+    "packet_loss_pct"
+  ],
+  "architecture": "6-16-8-16-6",
+  "trained_on": "simulated healthy telemetry (edge/telemetry.py)",
+  "train_rows": 133800,
+  "train_towers": [
+    "KL-01",
+    "KL-02",
+    "KL-03",
+    "KL-04",
+    "KL-05",
+    "KL-06",
+    "KL-07",
+    "KL-08",
+    "KL-09",
+    "KL-10",
+    "KL-11",
+    "KL-12",
+    "KL-13",
+    "KL-14",
+    "KL-15"
+  ],
+  "threshold": 0.001123,
+  "threshold_percentile": 99.5,
+  "healthy_false_positive_rate": 0.005,
+  "fault_separation": {
+    "amplifier_degradation": {
+      "median_error": 5721.8486,
+      "fraction_above_threshold": 1.0
+    },
+    "power_failure": {
+      "median_error": 774938.25,
+      "fraction_above_threshold": 1.0
+    },
+    "backhaul_congestion": {
+      "median_error": 14393.4492,
+      "fraction_above_threshold": 1.0
+    },
+    "antenna_misalignment": {
+      "median_error": 2244.21,
+      "fraction_above_threshold": 1.0
+    }
+  },
+  "shipped_artifact": "edge_anomaly_fp32.onnx",
+  "fp32": {
+    "bytes": 3052,
+    "max_drift": 2e-06,
+    "false_positive_rate": 0.0045,
+    "median_error": 4.422999336384237e-05
+  },
+  "int8": {
+    "bytes": 4910,
+    "max_drift": 0.118718,
+    "false_positive_rate": 0.509,
+    "median_error": 0.0011344351805746555
+  },
+  "int8_rejected_reason": "at ~700 parameters INT8 is both larger than FP32 and introduces quantisation noise orders of magnitude above the decision threshold",
+  "sha256_fp32": "9f630620aa949a1380b00cf05845e1699a76757240b476ee1f683f7433ab0dc0",
+  "sha256_int8": "1716c77d7df7464fa2dd34761071e1469c6f6645812b79a0d64524950c658977"
+}

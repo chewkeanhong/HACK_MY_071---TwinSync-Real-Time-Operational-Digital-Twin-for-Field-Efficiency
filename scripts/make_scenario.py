@@ -131,6 +131,36 @@ def main(argv=None) -> int:
         "note": "rush-hour jam on the secondary arterials around the first fault",
     }]
 
+    # A northeast-monsoon squall crossing the AOI. Positioned upwind of the CBD and
+    # drifting southwest across it, arriving between Acts 2 and 3 so the storm and the
+    # fault timeline interact rather than running past each other.
+    #
+    # The cell does four things at once, and that is the point of having it: rain fade
+    # on the 18 GHz backhaul hops it passes over, lightning raising the power-failure
+    # hazard, humidity pushing cabinet temperatures up, and flooding on the low-lying
+    # road segments the DEM identifies. One weather object, four subsystems.
+    centre_x = (min_x + max_x) / 2.0
+    centre_y = (min_y + max_y) / 2.0
+    # Start northeast of centre so the southwest drift carries it over the CBD.
+    origin_lon, origin_lat = world.frame.to_lonlat(centre_x + 1500.0,
+                                                   centre_y + 1500.0)
+    weather = {
+        "profile": "northeast_monsoon",
+        "baseline": {"humidity_pct": 82.0, "wind_kmh": 11.0},
+        "storm_cells": [{
+            "lon": round(float(origin_lon), 7),
+            "lat": round(float(origin_lat), 7),
+            "radius_m": 1600.0,
+            "peak_mm_hr": 95.0,
+            "start_s": 600.0,
+            "duration_s": 1500.0,
+            "drift_bearing_deg": 225.0,
+            "drift_kmh": 16.0,
+            "lightning_per_km2_hr": 7.0,
+            "note": "afternoon convective cell tracking southwest over the CBD",
+        }],
+    }
+
     scenario = {
         "name": "KL CBD -- three-act incident timeline",
         "seed": args.seed,
@@ -147,6 +177,7 @@ def main(argv=None) -> int:
         "crews": crews,
         "faults": faults,
         "congestion": congestion,
+        "weather": weather,
     }
 
     args.out.parent.mkdir(parents=True, exist_ok=True)

@@ -56,9 +56,22 @@ class Incident:
     assigned_minutes: float | None = None
     ai_cluster_id: str | None = None
     ai_cluster_members: list[str] = field(default_factory=list)
+    # True when ST-DBSCAN found no co-located, contemporaneous, compatible cascade --
+    # i.e. this really is a standalone fault rather than part of a group.
+    ai_cluster_noise: bool = False
+    ai_cluster_span_m: float = 0.0
+    ai_cluster_span_s: float = 0.0
+    # When the cluster this incident belongs to was first localised. Time-to-localise is
+    # measured from the fault starting to this instant.
+    ai_localised_at: float | None = None
     ai_risk_score: float = 0.0
     ai_risk_band: str = "low"
-    ai_model_source: str = "simulated-v0.1"
+    ai_risk_factors: list[dict] = field(default_factory=list)
+    # "none" until a model has actually scored this incident. The baseline arm runs no
+    # localiser and no risk model at all, and its incidents must not carry a model tag
+    # implying otherwise -- that would quietly credit the A/B's control group with the
+    # thing being tested.
+    ai_model_source: str = "none"
 
     @property
     def resolved(self) -> bool:
@@ -87,6 +100,12 @@ class Crew:
     on_site_until: float | None = None
     trips: int = 0                     # completed truck rolls
     jobs_done: int = 0
+    # Odometer and clock, accumulated as legs are dispatched and worked. These are what
+    # the fuel, CO2 and crew-utilisation figures are computed from, so they have to come
+    # from the routes actually driven rather than from straight-line estimates.
+    distance_m: float = 0.0
+    driving_s: float = 0.0
+    on_site_s: float = 0.0
 
     @property
     def current_job(self) -> str | None:
@@ -288,6 +307,10 @@ class DispatchEngine:
         crew.route_progress_s = 0.0
         crew.eta_s = route.travel_time_s if route else 0.0
         crew.status = "en_route"
+        if route is not None:
+            # Road distance, not crow-flies. The whole fuel/CO2 argument depends on
+            # counting the kilometres actually driven.
+            crew.distance_m += route.distance_m
         if new_trip:
             crew.trips += 1
         self._note(now, f"{crew.id} -> {target.id} at {target.tower_id}, "
@@ -303,12 +326,14 @@ class DispatchEngine:
         for crew in self.crews:
             if crew.status == "en_route":
                 crew.route_progress_s += dt
+                crew.driving_s += dt
                 crew.eta_s = max(0.0, (crew.route.travel_time_s if crew.route else 0.0)
                                  - crew.route_progress_s)
                 if crew.eta_s <= 0.0:
                     self._arrive(now, crew)
 
             elif crew.status == "on_site":
+                crew.on_site_s += dt
                 if crew.on_site_until is not None and now >= crew.on_site_until:
                     self._finish(now, crew)
 

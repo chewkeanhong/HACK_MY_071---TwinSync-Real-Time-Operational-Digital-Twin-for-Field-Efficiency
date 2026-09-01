@@ -15,64 +15,141 @@ dispatches crews over the real street graph.
 ## Quick start
 
 ```bash
-pip install fastapi uvicorn websockets shapely networkx pytest
+pip install -r requirements.txt
 python -m uvicorn twinsync.server:app --port 8000
 # open http://localhost:8000
 ```
 
-Runs entirely offline. No map tiles, no CDN, no API keys — deck.gl is vendored and the
-roads are drawn from our own GeoJSON.
+Runs entirely offline. No map tiles, no CDN, no API keys — deck.gl is vendored, the roads
+are drawn from our own GeoJSON, the DEM grid and both model artifacts are committed.
 
 **Headless, no browser needed:**
 ```bash
 python -m twinsync.sim --scenario data/scenario.json --seed 42
-pytest tests/ -q
+pytest tests/ -q                                    # 117 tests
+```
+
+**Browser smoke test** — checks the things pytest structurally cannot: that deck.gl
+paints, that every layer constructs, and that the controls are actually clickable rather
+than merely present:
+```bash
+python -m playwright install chromium               # once
+python scripts/verify_ui.py http://127.0.0.1:8000 shots/
+```
+
+**Regenerate everything** (needs `pip install -r requirements-dev.txt`):
+```bash
+python scripts/fetch_dem.py --data data             # Copernicus GLO-30 -> data/terrain.json
+python scripts/make_scenario.py --out data/scenario.json
+python scripts/train_edge_model.py --out models/    # ONNX anomaly autoencoder
+python scripts/train_risk_model.py  --out models/   # LightGBM + SHAP plots
+python scripts/bench_edge.py --iterations 5000      # the latency table below
 ```
 
 ---
 
-## Prototype scope disclosure (v0.1)
+## What is real and what is simulated
 
-This repository is explicit about what is production model output vs simulated output.
+The single most useful thing this README can do is tell you which claims have a file
+behind them. Full detail in [MODEL_CARDS.md](MODEL_CARDS.md); `GET /api/models` reports
+the same thing live, with artifact hashes.
 
-- **ST-DBSCAN fault localisation** and **LightGBM risk scoring** are currently
-  **simulated** in [edge/intelligence.py](edge/intelligence.py). The simulator emits
-  stable cluster IDs and risk bands so the API and UI integration are real, while model
-  training artifacts (`.pkl`, `.onnx`) are deferred.
-- Incidents expose these outputs through `ai_*` fields in `/api/state`, and the incident
-  panel labels them as `simulated-v0.1`.
-- **Copernicus DEM GLO-30 is not yet integrated** in this version. The current Z-axis
-  reasoning comes from extruded building heights (OSM + imputed), not terrain raster
-  elevation.
-- **Edge ONNX/TFLite artifacts are not included** in this repository. The edge tier in
-  [edge/detector.py](edge/detector.py) and [edge/telemetry.py](edge/telemetry.py) simulates
-  what would run on Jetson Orin Nano / Raspberry Pi class hardware in deployment.
+| Component | Status |
+|---|---|
+| **ST-DBSCAN fault localisation** | **Real algorithm** — [twinsync/stdbscan.py](twinsync/stdbscan.py). Two radii, true core/border/noise labels, 3D distance using DEM-derived antenna altitude. Not a trained model, so there is no artifact to ship. |
+| **Edge anomaly inference** | **Real ONNX artifact** — `models/edge_anomaly_fp32.onnx`, 3.0 KB, served by onnxruntime. Trained on simulated healthy telemetry. |
+| **LightGBM 7-day risk** | **Real trained booster** — `models/risk_lgbm.txt`. Trained on **synthetic** labels from a documented hazard model. |
+| **SHAP explainability** | **Real** — exact TreeSHAP from `pred_contrib`, computed per incident. The tooltip numbers differ per tower because they are actually computed. |
+| **Copernicus DEM GLO-30** | **Real data** — tile `N03_00_E101_00` off the AWS open-data bucket, baked to `data/terrain.json`. Feeds Fresnel clearance, the ST-DBSCAN Z axis, and flood-prone road detection. |
+| **3D coverage** | **Real** — ray-casting with a 60 % first-Fresnel clearance criterion over terrain and buildings. |
+| **Monsoon weather** | **Real physics, synthetic scenario** — ITU-R P.838 rain fade on 18 GHz backhaul. The storm cells are authored, not observed. |
+| **Sentinel-2 NDVI encroachment** | **Still simulated.** A static per-site value seeded from the site id, labelled `sentinel2-ndvi-simulated-v0.1` everywhere it appears. |
+| **Asset age / maintenance history** | **Invented.** No asset register exists for this prototype; derived deterministically from the site id. The weakest input to the risk model, and listed as such on its model card. |
 
-This keeps claims honest for a hackathon prototype while preserving a clean integration
-point for swapping in real trained models and DEM-backed terrain later.
+Two things worth stating plainly:
 
----
-
-## Future work & scaling
-
-- **Sentinel-2 L2A NDVI for vegetation encroachment** is part of the target architecture.
-  For this 4-day prototype, encroachment risk is mocked as static per-tower variables in
-  the simulation output (`tower_digest.encroachment_risk`) so dashboard and control logic
-  can be validated without a raster processing pipeline.
-- **SHAP explainability** is currently represented as simulated attribution text in tower
-  tooltips when a tower is degraded/down. Human-in-the-loop approval workflow is on the
-  UI roadmap for production dispatch.
+- **The models are trained on synthetic data.** No public dataset of telecom site
+  failures exists. The models, training and validation are real; the ground truth is
+  generated by scripts in this repo, with every assumption documented in the script that
+  makes it.
+- **The ML never dispatches anything.** [twinsync/priority.py](twinsync/priority.py) is
+  the deterministic, auditable dispatcher. The risk score is advisory context shown to a
+  human — which is the honest place for a model trained on synthetic labels.
 
 ---
 
-## The four GeoAI components
+## Measured edge performance
+
+From [scripts/bench_edge.py](scripts/bench_edge.py) on an AMD Ryzen (Family 25),
+Python 3.14.4, onnxruntime 1.29.0. Every timing claim in this project comes from that
+script; nothing here is asserted by hand.
+
+| stage | cadence | p50 | p95 | p99 |
+|---|---|---|---|---|
+| EWMA z-score | every sample | 1.8 µs | 1.9 µs | 2.3 µs |
+| Mahalanobis | every sample | 2.6 µs | 2.7 µs | 2.7 µs |
+| Autoencoder (ONNX) | 1 in 20 | 14.4 µs | 15.3 µs | 22.7 µs |
+| IsolationForest (fallback) | fallback only | 1894 µs | 1935 µs | 2162 µs |
+| **full `observe()`** | every sample | 11.8 µs | 29.5 µs | 31.6 µs |
+
+Model on disk **3.0 KB**. A 15-tower fleet of live detectors adds **1.2 MB** RSS (80 KB
+per tower — the network is tower-agnostic so one `InferenceSession` is shared). At 10 Hz
+that fleet uses **0.08 % of one core**.
+
+The exported model is **126× cheaper** than the per-tower IsolationForest it replaced,
+which is what makes the confirmation stage affordable on constrained hardware.
+
+### INT8 quantisation was tried and rejected
+
+The plan was to ship a quantised model. Measurement said otherwise: at ~700 parameters
+INT8 is *larger* than FP32 (4.8 KB vs 3.0 KB — the Quantize/Dequantize nodes cost more
+than the weights they save), and quantisation noise (0.119) sits two orders of magnitude
+above the decision threshold (0.001123), so the quantised graph flags **51 % of healthy
+traffic**. Both artifacts are committed so the comparison can be re-run.
+
+---
+
+## Future work
+
+- **Sentinel-2 L2A NDVI for vegetation encroachment** remains the one simulated input in
+  the pipeline. It feeds the risk model as a feature and is labelled as simulated
+  everywhere it surfaces.
+- **A real asset register** would replace the hash-derived age and maintenance features,
+  which are currently the weakest inputs to the risk model.
+- **Temporal validation** for the risk model — sites are held out, but weeks are not held
+  out forward in time.
+
+---
+
+## The GeoAI components
 
 | # | Component | What it does |
 |---|---|---|
-| 1 | **Height imputation** | Random forest fills the 83% of footprints OSM has no height for |
-| 2 | **3D line-of-sight coverage** | Ray-casts antenna → facade against extruded buildings |
-| 3 | **Edge anomaly detection** | EWMA + Mahalanobis at full rate, Isolation Forest on a duty cycle |
-| 4 | **Impact-ranked dispatch** | A\* on travel time, trip batching, priority preemption |
+| 1 | **Copernicus DEM ingest** | GLO-30 tile → 30 m elevation grid; ground truth for the Z axis |
+| 2 | **Height imputation** | Random forest fills the 83 % of footprints OSM has no height for |
+| 3 | **3D line-of-sight coverage** | Ray-casts antenna → facade against terrain *and* extruded buildings, at 60 % Fresnel clearance |
+| 4 | **Edge anomaly detection** | EWMA + Mahalanobis at full rate, ONNX autoencoder on a duty cycle |
+| 5 | **ST-DBSCAN localisation** | Groups alarms in space, time and fault family; isolates the ones that are genuinely unrelated |
+| 6 | **LightGBM risk + SHAP** | 7-day failure probability with per-incident attributions |
+| 7 | **Monsoon weather** | Drifting cells; ITU-R P.838 rain fade on backhaul, DEM-derived road flooding |
+| 8 | **Impact-ranked dispatch** | A\* on travel time, trip batching, priority preemption, flood rerouting |
+
+### Where the fusion actually happens
+
+The competition asks for multi-source geospatial fusion, so it is worth naming the one
+path that touches three sources at once and changes a decision:
+
+```
+Copernicus DEM  ──► which road segments sit in the bottom decile of elevation
+monsoon cell    ──► where rain is falling right now, and how hard
+OSM road graph  ──► which of those segments are on the crew's route
+                         │
+                         ▼
+              travel time repriced → A* reroutes → different crew wins the job
+```
+
+That is visible live: click **Monsoon storm** and watch the flooded segments light up
+cyan and the crew routes change.
 
 ---
 
@@ -84,22 +161,34 @@ edge inference). It is a controlled experiment, not a marketing claim.
 
 | metric | today | TwinSync |
 |---|---|---|
-| mean time to restore | 40.3 min | **35.7 min** (−11%) |
-| mean detection time | 10.0 min | **0.05 min** |
+| MTTD — detect | 10.0 min | **0.04 min** (2.4 s) |
+| MTTL — localise | n/a | **0.04 min** |
+| MTTR — restore (mean) | 40.3 min | **35.7 min** (−11%) |
+| MTTR — p90 | 41.6 min | 44.7 min |
 | truck rolls | 4 | **3** |
-| subscriber-minutes lost | 443,766 | **400,275** |
+| distance driven | 9.3 km | **6.8 km** |
+| CO₂ | 2.7 kg | **2.0 kg** |
+| crew utilisation | 50.7 % | 50.5 % |
+| subscriber-minutes lost | 444,581 | **401,026** |
+| SLA uptime | 98.866 % | **98.977 %** |
 | edge uplink | 63.3 MB raw | **942 KB (−98.5%)** |
 
-**The 11% is honest and modest**, because on-site repair time dominates and is identical
-in both arms. The large win is detection (10 min → 3 s) and backhaul (−98.5%).
+**The 11 % is honest and modest**, because on-site repair time dominates and is identical
+in both arms. The large win is detection (10 min → 2.4 s) and backhaul (−98.5 %).
+
+**And the p90 is worse, deliberately shown.** Batching a second job onto an in-flight
+trip is what removes the truck roll, and it also makes that second job wait. The mean
+improves, the tail does not. Reporting only the mean would hide a real trade-off an
+operator would want to know about before adopting this.
 
 ### The headline 3D number
 
-With three towers down, a fair 2D coverage model — inside a failed circle, outside every
-healthy one — reports **3 buildings dark, 3 subscribers**. True 3D line-of-sight says
-**40 buildings, 6,703 subscribers**.
+With the scenario's four towers down, a fair 2D coverage model — inside a failed circle,
+outside every healthy one — reports **3 buildings dark, 3 subscribers**. True 3D
+line-of-sight over terrain, with Fresnel clearance, says **47 buildings, 9,026
+subscribers**.
 
-**The flat map misses 6,700 people who are genuinely off the air.** It does not raise a
+**The flat map misses 9,023 people who are genuinely off the air.** It does not raise a
 false alarm; it says "the neighbouring cell has them" and is wrong, because a 200 m tower
 stands between those buildings and the neighbouring cell.
 
@@ -108,14 +197,37 @@ The dashboard has three view modes, switchable by button or the `1` `2` `3` keys
 | key | mode | what it shows |
 |---|---|---|
 | `1` | **2D** | the flat coverage map as dispatch draws it today — every tower's circle, overlapping |
-| `2` | **3D** | true line of sight against the extruded city (default) |
+| `2` | **3D** | true line of sight against the extruded city over DEM terrain (default) |
 | `3` | **Compare** | both, side by side, off the same instant of the same simulation |
 
-Compare is the one to hold on during the pitch: left pane looks calm, right pane has 40
+### Driving the demo live
+
+The scripted timeline runs on its own, but the cascade can be triggered by hand — which
+is what to do if a judge asks "what if it rains", or if the script drifts out of sync
+with what you are saying.
+
+| control | key | what happens |
+|---|---|---|
+| **Monsoon storm** | `S` | a cell enters upwind and drifts across: rain fade on the 18 GHz backhaul, low-lying roads flood, dispatch reroutes |
+| **Tower outage** | `F` | fails the selected site with the selected profile |
+| speed slider | — | 1×–60× simulated time |
+
+The cascade to narrate, end to end:
+
+`storm drifts in → rain fade degrades backhaul → edge ONNX confirms the anomaly →
+ST-DBSCAN groups nearby alarms into one cluster and marks the unrelated one isolated →
+LightGBM re-scores with rainfall as a live feature → flooded roads reprice → dispatch
+reroutes and preempts`
+
+Trigger two nearby towers inside the 10-minute window and they share a cluster id;
+trigger a distant one and it comes back `ISOLATED`. That contrast is the clearest
+one-click proof the clustering is real rather than a label generator.
+
+Compare is the one to hold on during the pitch: left pane looks calm, right pane has 47
 red buildings.
 
 > A note on what *not* to claim: simply counting everything inside the failed towers'
-> circles gives 723 buildings against a true 40, which looks like a far more impressive
+> circles gives 1,054 buildings against a true 47, which looks like a far more impressive
 > number and is a strawman — no operator reasons that way, because they can see the
 > neighbouring circles overlapping. Both flat readings are wrong; only the one that
 > leaves people off the air is worth putting on a slide. Locked down in
@@ -161,26 +273,39 @@ the AOI boundary. Snapping is now restricted to the largest *strongly* connected
 ## Architecture
 
 ```
-Browser — deck.gl (vendored)          buildings · outage shadow · towers · crew routes
-    ▲ WebSocket, 4 Hz state deltas
-FastAPI — simulation clock · coverage · dispatch · metrics
+Browser — deck.gl (vendored)   terrain · buildings · outage shadow · storm cells · crews
+    ▲ WebSocket, 4 Hz full state snapshots
+FastAPI — simulation clock · coverage · dispatch · weather · metrics
     ▲ events only, never raw telemetry
-Edge agents — per-tower telemetry + local anomaly inference
+Edge agents — per-tower telemetry + local ONNX anomaly inference
+
+Baked in once, read at runtime:
+    Copernicus DEM GLO-30 ──► data/terrain.json ──► Fresnel clearance
+                                                ├─► ST-DBSCAN Z axis
+                                                └─► flood-prone roads
+    OSM footprints + height imputation ─────────► extruded city
+    models/*.onnx, models/risk_lgbm.txt ────────► edge + risk inference
 ```
 
 The browser is a pure renderer; the server owns the clock. Building geometry goes over
-HTTP once, so only mutable state rides the socket.
+HTTP once, so only mutable state rides the socket — a full snapshot each frame, not a
+delta.
 
 | path | role |
 |---|---|
 | `twinsync/geo.py` | numpy geometry, local projection, grid index |
-| `twinsync/coverage.py` | 3D LOS raycasting, fingerprinted cache |
-| `twinsync/routing.py` | street graph, A\* on travel time, congestion |
+| `twinsync/terrain.py` | DEM sampling, slope, path profiles, flood proneness |
+| `twinsync/coverage.py` | 3D LOS raycasting with Fresnel clearance, fingerprinted cache |
+| `twinsync/routing.py` | street graph, A\* on travel time, congestion, flooding |
 | `twinsync/dispatch.py` | assignment, batching, preemption (`smart=False` = baseline) |
+| `twinsync/stdbscan.py` | spatio-temporal fault localisation |
+| `twinsync/risk.py` | LightGBM scoring + per-incident TreeSHAP |
+| `twinsync/weather.py` | drifting storm cells, ITU-R P.838 rain fade, flooding |
+| `twinsync/metrics.py` | MTTD/MTTL/MTTR, truck rolls, fuel, CO₂, SLA uptime |
 | `twinsync/sim.py` | headless simulation, both arms |
-| `edge/detector.py` | three detectors on two cadences |
-| `edge/intelligence.py` | simulated ST-DBSCAN + LightGBM output contracts (v0.1) |
-| `scripts/` | one-time data pipeline |
+| `edge/detector.py` | three detectors on two cadences, ONNX confirmation stage |
+| `edge/intelligence.py` | adapter over the localiser and the risk scorer |
+| `scripts/` | data pipeline, model training, benchmark |
 
 ### Prototype infrastructure note
 
@@ -192,11 +317,12 @@ rather than through an external broker in this repository.
 
 ### Two performance notes
 
-`IsolationForest.score_samples` costs **2.2 ms per call**, and that is almost entirely
+`IsolationForest.score_samples` costs **~1.9 ms per call**, and that is almost entirely
 fixed overhead — scoring 15 rows costs the same as scoring one. At 10 Hz across 15 towers
-it would need a third of a CPU core. Running the cheap tests every sample and the forest
-on a duty cycle made the fleet **15× cheaper** (2211 µs → 150 µs) with no loss in
-detection latency.
+it would need a third of a CPU core. Two things fixed that: running the cheap tests every
+sample and the expensive one on a duty cycle, then replacing the forest with a 3 KB
+exported network at **15 µs**. See the measured table above; the numbers come from
+`scripts/bench_edge.py` rather than from this paragraph.
 
 deck.gl reads its container's size when it builds its canvas. Constructing it before
 layout settles yields a canvas that reports correct dimensions and **never paints** — the

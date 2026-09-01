@@ -14,6 +14,7 @@ from pathlib import Path
 import numpy as np
 
 from .geo import LocalFrame, PolygonSet, ring_area, ring_centroid, ring_perimeter
+from .terrain import Terrain
 
 STOREY_HEIGHT = 3.2
 
@@ -61,16 +62,30 @@ class Building:
     centroid_lonlat: tuple[float, float]
     subscribers: int
     critical: bool
+    # Ground elevation under the footprint, from the Copernicus DEM. Zero when no
+    # terrain has been baked, which reproduces the pre-DEM flat-earth behaviour.
+    ground_elev: float = 0.0
     ring_lonlat: list[list[float]] = field(repr=False, default_factory=list)
 
     @property
     def floors(self) -> int:
         return max(1, int(round(self.height / STOREY_HEIGHT)))
 
+    @property
+    def roof_z(self) -> float:
+        """Roof altitude above sea level -- what a radio ray actually has to clear."""
+        return self.ground_elev + self.height
+
 
 @dataclass
 class Tower:
-    """A network asset. Antenna height is above sea level, i.e. rooftop + mast."""
+    """A network asset.
+
+    ``antenna_height`` is height above the *ground beneath the tower*, as OSM records
+    it. ``antenna_z`` adds the DEM elevation to get altitude above sea level, which is
+    what the coverage raycaster and the ST-DBSCAN Z axis both need -- two towers at the
+    same 40 m mast height are not at the same altitude if one sits 30 m up a hill.
+    """
 
     id: str
     name: str
@@ -81,6 +96,18 @@ class Tower:
     range_m: float
     host_building: str | None = None
     status: str = "healthy"     # healthy | degraded | down
+    ground_elev: float = 0.0
+    # Carrier frequency for the access link. Fresnel radius scales with wavelength, so
+    # the clearance test needs to know the band rather than assume one.
+    frequency_mhz: float = 2100.0
+
+    @property
+    def base_z(self) -> float:
+        return self.ground_elev
+
+    @property
+    def antenna_z(self) -> float:
+        return self.ground_elev + self.antenna_height
 
 
 def _estimate_subscribers(kind: str, area_m2: float, height: float) -> int:
@@ -94,11 +121,15 @@ class World:
     """Loads GeoJSON into flat arrays and owns the projection frame."""
 
     def __init__(self, frame: LocalFrame, buildings: list[Building],
-                 polygons: PolygonSet, towers: list[Tower]):
+                 polygons: PolygonSet, towers: list[Tower],
+                 terrain: "Terrain | None" = None):
         self.frame = frame
         self.buildings = buildings
         self.polygons = polygons
         self.towers = towers
+        # Falls back to a flat surface so every terrain-aware path stays live and
+        # simply concludes the ground is level -- the twin's pre-DEM behaviour.
+        self.terrain = terrain if terrain is not None else Terrain.flat()
         self._by_id = {b.id: b for b in buildings}
         self._tower_by_id = {t.id: t for t in towers}
 
@@ -153,12 +184,19 @@ class World:
                 centroid_lonlat=(float(lon[:-1].mean()), float(lat[:-1].mean())),
                 subscribers=_estimate_subscribers(kind, area, height),
                 critical=(amenity in CRITICAL_AMENITIES) or (kind in CRITICAL_BUILDINGS),
+                ground_elev=float(props.get("ground_elev") or 0.0),
                 ring_lonlat=ring_lonlat,
             ))
             rings.append(ring)
             heights.append(height)
 
-        polygons = PolygonSet(rings, np.array(heights))
+        # The raycaster works in altitude above sea level, so the extrusion array it
+        # indexes has to be roof altitude, not roof height above local ground. With no
+        # DEM every ground_elev is 0.0 and this reduces to the old behaviour exactly.
+        polygons = PolygonSet(rings, np.array([b.roof_z for b in buildings]))
+
+        terrain_path = data_dir / "terrain.json"
+        terrain = Terrain.load(terrain_path) if terrain_path.exists() else None
 
         towers: list[Tower] = []
         towers_path = data_dir / "towers.geojson"
@@ -167,7 +205,7 @@ class World:
         elif require_towers:
             raise FileNotFoundError(f"{towers_path} not found -- run scripts/place_towers.py")
 
-        return cls(frame, buildings, polygons, towers)
+        return cls(frame, buildings, polygons, towers, terrain)
 
     @staticmethod
     def _load_towers(path: Path, frame: LocalFrame) -> list[Tower]:
@@ -185,6 +223,8 @@ class World:
                 antenna_height=float(props["antenna_height"]),
                 range_m=float(props.get("range_m", 600.0)),
                 host_building=props.get("host_building"),
+                ground_elev=float(props.get("ground_elev") or 0.0),
+                frequency_mhz=float(props.get("frequency_mhz") or 2100.0),
             ))
         return towers
 

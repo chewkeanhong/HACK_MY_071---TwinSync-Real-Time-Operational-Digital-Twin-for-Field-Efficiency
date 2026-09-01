@@ -1,70 +1,78 @@
-"""Simulated intelligence-layer outputs for the v0.1 prototype.
+"""Intelligence-layer adapter.
 
-The hackathon demo integrates two AI contracts exposed to the twin:
+Two model outputs are exposed to the twin, and both are now produced by real models
+rather than stand-ins:
 
-* ST-DBSCAN fault localisation (cluster id + member towers)
-* LightGBM risk scoring (0-100 score + risk band)
+* **ST-DBSCAN fault localisation** -- :mod:`twinsync.stdbscan`. Genuine spatio-temporal
+  density clustering over (x, y, antenna-z, t, fault-family), with real noise labels.
+* **LightGBM 7-day failure risk** -- :mod:`twinsync.risk`. A gradient-boosted model
+  loaded from ``models/risk_lgbm.txt``, with live SHAP attributions.
 
-In this repository version those outputs are simulated, not produced by trained models.
-This keeps the pipeline and API shape stable so real models can be dropped in later.
+This module is deliberately thin. It exists so the simulation has one place to reach for
+"the intelligence layer" and so the fallback policy lives somewhere obvious: if the
+LightGBM artifact is missing, :class:`IntelligenceLayer` degrades to the documented
+heuristic rather than refusing to start, and says so through ``model_source``. A demo
+that dies because a file is absent is worse than one that is honest about running
+degraded.
+
+The clustering has no such fallback, because it needs no artifact -- it is an algorithm,
+not a trained model.
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from hashlib import sha1
-
+from twinsync.risk import HEURISTIC_MODEL, RiskResult, RiskScorer
+from twinsync.stdbscan import AlarmClusterer, LocalisationResult
 from twinsync.world import World
 
-
-@dataclass(frozen=True)
-class LocalisationResult:
-    cluster_id: str
-    members: list[str]
-    model: str = "st-dbscan-simulated"
+__all__ = ["IntelligenceLayer", "LocalisationResult", "RiskResult"]
 
 
-@dataclass(frozen=True)
-class RiskResult:
-    score: float
-    band: str
-    model: str = "lightgbm-simulated"
+class IntelligenceLayer:
+    """Fault localisation and risk scoring, behind one object."""
 
-
-class IntelligenceLayerSimulator:
-    """Deterministic stand-ins for the pitch's intelligence-layer model outputs."""
-
-    def __init__(self, world: World) -> None:
+    def __init__(self, world: World, *, models_dir=None):
         self.world = world
+        self.clusterer = AlarmClusterer(world)
+        self.risk = RiskScorer.load(models_dir)
 
-    def simulate_st_dbscan(self, failed_towers: set[str], now_s: float) -> LocalisationResult:
-        members = sorted(failed_towers)
-        if not members:
-            return LocalisationResult(cluster_id="CL-NONE", members=[])
+    # -- localisation ----------------------------------------------------
 
-        bucket = int(now_s // 120.0)
-        digest = sha1("|".join(members + [str(bucket)]).encode("utf-8")).hexdigest()
-        cluster_id = f"CL-{digest[:6].upper()}"
-        return LocalisationResult(cluster_id=cluster_id, members=members)
+    def localise(self, tower_id: str, fault_profile: str,
+                 now_s: float) -> LocalisationResult:
+        """Cluster this alarm against the recent ones. May return an isolated verdict."""
+        return self.clusterer.observe(tower_id, fault_profile, now_s)
 
-    def simulate_lightgbm_risk(self, severity: str, subscribers: int, critical_count: int,
-                               minutes_open: float, sla_minutes: float) -> RiskResult:
-        severity_feature = 1.0 if severity == "down" else 0.6
-        reach_feature = min(1.0, max(0.0, subscribers / 12000.0))
-        critical_feature = min(1.0, max(0.0, critical_count / 3.0))
-        urgency_feature = min(1.0, max(0.0, minutes_open / max(sla_minutes, 1.0)))
+    def release(self, tower_id: str) -> None:
+        """Forget a tower's alarm once its incident is closed."""
+        self.clusterer.forget(tower_id)
 
-        score = 100.0 * (
-            0.35 * reach_feature
-            + 0.30 * severity_feature
-            + 0.20 * critical_feature
-            + 0.15 * urgency_feature
+    # -- risk ------------------------------------------------------------
+
+    def score_risk(self, tower_id: str, *, severity: str, subscribers: int,
+                   critical_count: int, minutes_open: float, sla_minutes: float,
+                   weather: dict | None = None, now_s: float = 0.0) -> RiskResult:
+        tower = self.world.tower(tower_id)
+        return self.risk.score(
+            tower,
+            severity=severity,
+            subscribers=subscribers,
+            critical_count=critical_count,
+            minutes_open=minutes_open,
+            sla_minutes=sla_minutes,
+            # The DEM feeds the risk model here: steep ground means harder access, worse
+            # drainage and more wind exposure at the mast.
+            terrain_slope_deg=float(self.world.terrain.slope_at(*tower.xy)),
+            weather=weather,
+            now_s=now_s,
         )
-        score = round(max(0.0, min(100.0, score)), 1)
-        if score >= 75.0:
-            band = "high"
-        elif score >= 45.0:
-            band = "medium"
-        else:
-            band = "low"
-        return RiskResult(score=score, band=band)
+
+    @property
+    def model_source(self) -> str:
+        """What actually produced these outputs, for the UI and /api/models."""
+        risk_tag = self.risk.model_tag
+        return f"{risk_tag}+st-dbscan-v1"
+
+    @property
+    def degraded(self) -> bool:
+        return self.risk.model_tag == HEURISTIC_MODEL

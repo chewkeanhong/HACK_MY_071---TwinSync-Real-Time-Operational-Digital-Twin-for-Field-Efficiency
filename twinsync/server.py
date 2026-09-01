@@ -15,10 +15,12 @@ from __future__ import annotations
 
 import asyncio
 import json
+import math
 import os
 from contextlib import asynccontextmanager
 from pathlib import Path
 
+import numpy as np
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
@@ -180,6 +182,119 @@ async def inject_fault(tower_id: str, profile: str = "amplifier_degradation"):
         engine.sim.faults[tower_id] = Fault(tower_id=tower_id, profile=profile,
                                             start_s=engine.sim.t)
     return {"ok": True, "tower": tower_id, "profile": profile}
+
+
+@app.post("/api/storm")
+async def spawn_storm(radius_m: float = 1600.0, peak_mm_hr: float = 95.0,
+                      duration_s: float = 1200.0, drift_bearing_deg: float = 225.0,
+                      drift_kmh: float = 16.0):
+    """Drop a monsoon cell over the AOI, now.
+
+    Spawned upwind of the scene centre so the drift carries it across, which is what
+    makes the effects visible: backhaul rain fade, then flooding on the low-lying roads
+    the DEM identifies, then dispatch rerouting around them.
+    """
+    if engine.sim is None:
+        return JSONResponse({"error": "not ready"}, status_code=503)
+
+    from .weather import StormCell
+
+    sim = engine.sim
+    # Enter from the upwind edge: the cell travels along drift_bearing, so start it
+    # 2 km back along that heading from the centre of the world.
+    bearing = math.radians(drift_bearing_deg)
+    centre = np.array([b.centroid_xy for b in sim.world.buildings]).mean(axis=0)
+    start = centre - np.array([math.sin(bearing), math.cos(bearing)]) * 2000.0
+
+    async with engine._lock:
+        sim.weather.cells.append(StormCell(
+            x=float(start[0]), y=float(start[1]),
+            radius_m=float(radius_m), peak_mm_hr=float(peak_mm_hr),
+            start_s=sim.t, duration_s=float(duration_s),
+            drift_bearing_deg=float(drift_bearing_deg), drift_kmh=float(drift_kmh),
+        ))
+        # Force the next tick to re-scan rather than wait out the flood check period.
+        sim._last_flood_check = -1e9
+        sim._log(f"WEATHER operator injected a monsoon cell "
+                 f"({peak_mm_hr:.0f} mm/hr, {radius_m / 1000:.1f} km)")
+
+    return {"ok": True, "cells": len(sim.weather.cells), "peak_mm_hr": peak_mm_hr}
+
+
+@app.get("/api/models")
+async def get_models():
+    """What is actually running, with artifact hashes. The judge-facing 'prove it'.
+
+    Reads the metadata the training scripts wrote, so this cannot drift from the models
+    on disk: if an artifact is missing, this says so rather than reporting the claim.
+    """
+    models_dir = Path(__file__).resolve().parents[1] / "models"
+    entries = []
+
+    for name, filename in (("edge anomaly autoencoder", "edge_anomaly_meta.json"),
+                           ("7-day failure risk", "risk_meta.json")):
+        path = models_dir / filename
+        if not path.exists():
+            entries.append({"name": name, "status": "missing",
+                            "note": "run the matching script in scripts/"})
+            continue
+        meta = json.loads(path.read_text(encoding="utf-8"))
+        entries.append({
+            "name": name,
+            "status": "loaded",
+            "model": meta.get("model"),
+            "created": meta.get("created"),
+            "trained_on": meta.get("trained_on") or meta.get("training_data"),
+            "artifact": meta.get("shipped_artifact", "risk_lgbm.txt"),
+            "sha256": meta.get("sha256") or meta.get("sha256_fp32"),
+            "metrics": meta.get("metrics") or {
+                "healthy_false_positive_rate": meta.get("healthy_false_positive_rate"),
+                "threshold": meta.get("threshold"),
+            },
+        })
+
+    terrain = engine.world.terrain if engine.world is not None else None
+    return {
+        "models": entries,
+        # Not models, but the same question -- what is real and what is a stand-in.
+        "algorithms": [
+            {"name": "ST-DBSCAN fault localisation", "model": "st-dbscan-v1",
+             "note": "algorithm, not a trained model -- no artifact to ship"},
+            {"name": "3D coverage", "model": "fresnel-raycast-v1",
+             "note": "deterministic ray-casting, 60% first-Fresnel clearance"},
+        ],
+        "data": {
+            "terrain": terrain.meta.describe() if terrain else "not loaded",
+            "terrain_is_real": bool(terrain and terrain.meta.is_real),
+            "encroachment": "sentinel2-ndvi-simulated-v0.1 (SIMULATED stand-in)",
+        },
+        "degraded": engine.sim.intelligence.degraded if engine.sim else None,
+    }
+
+
+@app.get("/api/metrics")
+async def get_metrics():
+    """Live KPI rollup for the dashboard tiles."""
+    if engine.sim is None:
+        return JSONResponse({"error": "not ready"}, status_code=503)
+    from .metrics import collect
+
+    sim = engine.sim
+    run = collect("live", sim.dispatch, sla_minutes=sim.sla_minutes,
+                  samples_generated=sim.samples_generated,
+                  events_uplinked=sim.events_uplinked,
+                  elapsed_seconds=sim.t,
+                  total_subscribers=sim.world.total_subscribers)
+    return run.as_dict()
+
+
+@app.get("/api/terrain")
+async def get_terrain():
+    """The DEM grid, so the client can shade the ground it is drawing on."""
+    path = DATA_DIR / "terrain.json"
+    if not path.exists():
+        return JSONResponse({"error": "no terrain baked"}, status_code=404)
+    return FileResponse(path, media_type="application/json")
 
 
 @app.get("/api/coverage/{tower_id}")

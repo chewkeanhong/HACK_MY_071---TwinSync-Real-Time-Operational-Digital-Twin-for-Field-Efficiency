@@ -36,9 +36,36 @@
       <button id="btn-view-split" class="seg-btn"
               title="Both models side by side, same instant (3)">Compare</button>
     </div>
+    <label class="speed" title="Simulated seconds per wall-clock second">
+      <span id="speed-label">12&times;</span>
+      <input type="range" id="speed" min="1" max="60" step="1" value="12">
+    </label>
     <span class="conn" id="conn">connecting…</span>
   </div>
 </header>
+
+<!-- Chaos panel: drive the cascade live rather than waiting for the script -->
+<section class="chaos" id="chaos">
+  <div class="chaos-inner">
+    <span class="chaos-label">inject</span>
+    <button id="btn-storm" class="chaos-btn storm"
+            title="Drop a monsoon cell upwind and let it drift across the CBD (S)">
+      Monsoon storm
+    </button>
+    <div class="chaos-fault">
+      <select id="fault-tower" aria-label="Tower"></select>
+      <select id="fault-profile" aria-label="Fault profile">
+        <option value="amplifier_degradation">amplifier degradation</option>
+        <option value="power_failure">power failure</option>
+        <option value="backhaul_congestion">backhaul congestion</option>
+        <option value="antenna_misalignment">antenna misalignment</option>
+      </select>
+      <button id="btn-fault" class="chaos-btn fault"
+              title="Fail this tower now (F)">Tower outage</button>
+    </div>
+    <span class="chaos-status" id="chaos-status"></span>
+  </div>
+</section>
 
 <!-- KPI row -->
 <section class="kpis" id="kpis">
@@ -61,6 +88,16 @@
     <span class="k-label">open incidents</span>
     <span class="k-value" id="kpi-open">0</span>
     <span class="k-note" id="kpi-open-note">crews idle</span>
+  </div>
+  <div class="kpi">
+    <span class="k-label">truck rolls</span>
+    <span class="k-value" id="kpi-rolls">0</span>
+    <span class="k-note" id="kpi-rolls-note">0.0 km &middot; 0.0 kg CO&#8322;</span>
+  </div>
+  <div class="kpi" id="kpi-weather-tile">
+    <span class="k-label">weather</span>
+    <span class="k-value" id="kpi-weather">clear</span>
+    <span class="k-note" id="kpi-weather-note">no active cells</span>
   </div>
 </section>
 

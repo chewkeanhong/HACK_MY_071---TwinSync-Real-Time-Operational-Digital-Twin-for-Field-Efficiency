@@ -5,17 +5,33 @@ has the wrong answer in a dense CBD, because a 200 m tower sits between the ante
 half the buildings inside that radius. Those buildings are in range and dark.
 
 Here a building is covered only if a ray from the antenna actually reaches its facade
-without passing through another building's volume. The gap between the two answers is the
-number the pitch is built on, and :meth:`CoverageEngine.compare_2d_vs_3d` reports it.
+with enough clearance. The gap between the two answers is the number the pitch is built
+on, and :meth:`CoverageEngine.compare_2d_vs_3d` reports it.
+
+Three things obstruct a path, and this module models all three:
+
+* **Buildings.** Extruded OSM footprints, ray-vs-prism, exact for a flat roof.
+* **Terrain.** The Copernicus DEM surface sampled along the path. A building-only model
+  cannot see a hillside, and in the Klang valley there is 40 m of relief across the AOI.
+* **The Fresnel zone.** A radio path is not a pencil line. Energy travels in an
+  ellipsoid around it, and an obstacle that merely grazes the geometric ray still costs
+  real signal. The standard planning rule is that 60 % of the first Fresnel zone must be
+  clear, and that is what is tested here -- clearing the line but not the zone counts as
+  blocked, because in the field it is.
 
 Coverage is precomputed once at startup and cached, so a tower failing at demo time is a
 set difference rather than a recomputation.
+
+All heights in this module are **altitude above sea level**, not height above local
+ground. That distinction only started mattering once the DEM landed: two 40 m masts are
+not at the same altitude if one of them stands 30 m up a hill.
 """
 
 from __future__ import annotations
 
 import hashlib
 import json
+import math
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -33,6 +49,36 @@ COVERED_THRESHOLD = 1.0 / 3.0
 
 # Receiver height offset so ground-floor samples are not buried in the pavement.
 GROUND_CLEARANCE_M = 1.5
+
+# Speed of light, for the Fresnel radius.
+C_M_S = 299_792_458.0
+
+# Fraction of the first Fresnel zone that must be clear of obstruction. 0.6 is the
+# textbook microwave-planning criterion: below it, diffraction loss climbs away from the
+# free-space value fast enough to matter. Setting this to 0.0 recovers the pure
+# hard-shadow geometric test this module used before the DEM was integrated.
+FRESNEL_CLEARANCE = 0.6
+
+# Terrain samples along a path. At a 30 m DEM grid and a <=650 m tower range this
+# oversamples the underlying data about 2x, so a narrow ridge cannot slip between two
+# samples. Cheap: one vectorised interpolation per ray.
+TERRAIN_SAMPLES = 24
+
+
+def fresnel_radius_m(d1: float, d2: float, frequency_mhz: float) -> float:
+    """First Fresnel zone radius at a point d1 from one end, d2 from the other.
+
+        r = sqrt(lambda * d1 * d2 / (d1 + d2))
+
+    At 2.1 GHz over a 400 m path the zone is under 4 m across at its widest, so this
+    tightens the coverage verdict without swamping it -- which is the honest outcome.
+    A backhaul hop at 18 GHz has a zone roughly a third that size.
+    """
+    total = d1 + d2
+    if total <= 0.0 or frequency_mhz <= 0.0:
+        return 0.0
+    wavelength = C_M_S / (frequency_mhz * 1e6)
+    return math.sqrt(max(0.0, wavelength * d1 * d2 / total))
 
 
 @dataclass
@@ -62,13 +108,23 @@ class CoverageEngine:
 
     def _is_blocked(self, origin_xy: np.ndarray, origin_z: float,
                     target_xy: np.ndarray, target_z: float,
-                    ignore: set[int]) -> bool:
-        """True if any building's volume intersects the 3D segment.
+                    ignore: set[int], frequency_mhz: float = 2100.0) -> bool:
+        """True if terrain or a building intrudes into the required Fresnel clearance.
 
-        The ray height varies linearly along the segment, so within a footprint the
-        lowest the ray gets is at one of the two crossing points -- comparing the roof
-        against those two heights is exact for a flat-roofed extrusion.
+        Both obstruction tests ask the same question -- how much room is there between
+        the ray and the top of the obstacle -- and compare it against 60 % of the local
+        first Fresnel radius rather than against zero. Passing zero clearance means the
+        obstacle is exactly touching the geometric line, which in the field is already a
+        badly degraded link.
         """
+        path_len = float(np.hypot(*(target_xy - origin_xy)))
+        if path_len <= 0.0:
+            return False
+
+        if self._terrain_blocks(origin_xy, origin_z, target_xy, target_z,
+                                path_len, frequency_mhz):
+            return True
+
         polygons = self.world.polygons
         for index in polygons.candidates_near_segment(origin_xy, target_xy):
             if index in ignore:
@@ -81,27 +137,97 @@ class CoverageEngine:
             if len(crossings) < 1:
                 continue
 
-            t_enter, t_exit = crossings[0], crossings[-1]
-            z_enter = origin_z + t_enter * (target_z - origin_z)
-            z_exit = origin_z + t_exit * (target_z - origin_z)
-            if min(z_enter, z_exit) < roof:
-                return True
+            # The ray height varies linearly along the segment, so within a footprint
+            # the lowest the ray gets is at one of the two crossing points -- checking
+            # those two is exact for a flat-roofed extrusion.
+            for t in (crossings[0], crossings[-1]):
+                ray_z = origin_z + t * (target_z - origin_z)
+                d1 = t * path_len
+                required = FRESNEL_CLEARANCE * fresnel_radius_m(
+                    d1, path_len - d1, frequency_mhz)
+                if ray_z - roof < required:
+                    return True
         return False
 
+    def _terrain_blocks(self, origin_xy: np.ndarray, origin_z: float,
+                        target_xy: np.ndarray, target_z: float,
+                        path_len: float, frequency_mhz: float) -> bool:
+        """Does the ground itself intrude into the Fresnel zone along this path?
+
+        Buildings are handled separately and exactly; this catches the thing a
+        footprint model structurally cannot see, which is a hill.
+        """
+        terrain = self.world.terrain
+        if terrain is None or terrain.meta.source == "none":
+            return False
+
+        t, ground = terrain.profile(origin_xy, target_xy, TERRAIN_SAMPLES)
+        ray = origin_z + t * (target_z - origin_z)
+        d1 = t * path_len
+        d2 = path_len - d1
+        # Vectorised Fresnel radius; the endpoints pinch to zero, as they should.
+        wavelength = C_M_S / (frequency_mhz * 1e6)
+        with np.errstate(divide="ignore", invalid="ignore"):
+            radius = np.sqrt(np.maximum(0.0, wavelength * d1 * d2 / path_len))
+        return bool(np.any(ray - ground < FRESNEL_CLEARANCE * radius))
+
     def _sample_points(self, building_index: int) -> list[tuple[np.ndarray, float]]:
-        """Points on the facade at several heights, as receiver positions."""
-        ring = self.world.polygons.ring(building_index)[:-1]   # drop closing vertex
-        height = float(self.world.polygons.heights[building_index])
+        """Points on the facade at several heights, as receiver positions.
+
+        Returned z values are altitudes above sea level: the DEM ground under the
+        footprint plus a fraction of the building's own height.
+        """
+        polygons = self.world.polygons
+        ring = polygons.ring(building_index)[:-1]   # drop closing vertex
+        building = self.world.buildings[building_index]
+        base = building.ground_elev
+        height = building.height
 
         step = max(1, len(ring) // FACADE_SAMPLES)
         facade = ring[::step][:FACADE_SAMPLES]
 
         points = []
         for fraction in HEIGHT_FRACTIONS:
-            z = max(GROUND_CLEARANCE_M, height * fraction)
+            z = base + max(GROUND_CLEARANCE_M, height * fraction)
             for point in facade:
                 points.append((point, z))
         return points
+
+    # -- link profiles ---------------------------------------------------
+
+    def link_profile(self, tower_a: str, tower_b: str, *,
+                     samples: int = 64) -> dict:
+        """Terrain + Fresnel profile of the backhaul hop between two towers.
+
+        Feeds the microwave backhaul link budget (which is what monsoon rain actually
+        degrades) and gives the dashboard something real to draw when an operator asks
+        why a hop is marginal.
+        """
+        a = self.world.tower(tower_a)
+        b = self.world.tower(tower_b)
+        path_len = float(np.hypot(*(b.xy - a.xy)))
+        frequency = max(a.frequency_mhz, b.frequency_mhz)
+
+        t, ground = self.world.terrain.profile(a.xy, b.xy, samples)
+        ray = a.antenna_z + t * (b.antenna_z - a.antenna_z)
+        d1 = t * path_len
+        radius = np.array([fresnel_radius_m(float(x), path_len - float(x), frequency)
+                           for x in d1])
+        clearance = ray - ground
+        margin = clearance - FRESNEL_CLEARANCE * radius
+
+        return {
+            "from": tower_a,
+            "to": tower_b,
+            "distance_m": round(path_len, 1),
+            "frequency_mhz": frequency,
+            "clear": bool(np.all(margin >= 0.0)),
+            "worst_margin_m": round(float(margin.min()), 2),
+            "worst_at_m": round(float(d1[int(np.argmin(margin))]), 1),
+            "ground": [round(float(v), 1) for v in ground],
+            "ray": [round(float(v), 1) for v in ray],
+            "fresnel_r": [round(float(v), 2) for v in radius],
+        }
 
     # -- precomputation --------------------------------------------------
 
@@ -129,7 +255,8 @@ class CoverageEngine:
                 ignore = {index} | ({host_index} if host_index is not None else set())
                 samples = self._sample_points(index)
                 visible = sum(
-                    0 if self._is_blocked(tower.xy, tower.antenna_height, point, z, ignore)
+                    0 if self._is_blocked(tower.xy, tower.antenna_z, point, z, ignore,
+                                          tower.frequency_mhz)
                     else 1
                     for point, z in samples
                 )
@@ -175,9 +302,10 @@ class CoverageEngine:
         """What a *fair* 2D model concludes goes dark: radius in, radius out.
 
         This is the comparison that matters, and it is not the flattering one. Simply
-        counting everything inside a failed tower's circle overstates wildly (723
-        buildings against a true 40) -- but no competent operator reasons that way; they
-        also see the neighbouring cells' circles overlapping the same ground.
+        counting everything inside a failed tower's circle overstates wildly (1,054
+        buildings against a true 47 on the demo scenario) -- but no competent operator
+        reasons that way; they also see the neighbouring cells' circles overlapping the
+        same ground.
 
         Do it properly and a 2D model concludes that **nobody** is affected, because
         every building inside the failed circle also sits inside some healthy one. It is
@@ -231,6 +359,11 @@ class CoverageEngine:
         building extrusions, which changes every ray, while leaving the tower list
         identical. A cache keyed only on tower ids would be silently reused and the
         outage shadow would no longer match the city on screen.
+
+        The terrain hash and the Fresnel criterion are in here for the same reason. A
+        cache computed against flat ground and a pencil-thin ray is not merely stale
+        after the DEM lands -- it is wrong, and wrong in a way nothing downstream would
+        notice.
         """
         heights = self.world.polygons.heights
         digest = hashlib.sha256()
@@ -238,7 +371,10 @@ class CoverageEngine:
         digest.update(f"|{len(self.world.buildings)}|".encode())
         digest.update(np.round(heights, 2).tobytes())
         for tower in sorted(self.world.towers, key=lambda t: t.id):
-            digest.update(f"|{tower.antenna_height:.2f}:{tower.range_m:.1f}".encode())
+            digest.update(f"|{tower.antenna_z:.2f}:{tower.range_m:.1f}"
+                          f":{tower.frequency_mhz:.0f}".encode())
+        digest.update(f"|terrain:{self.world.terrain.fingerprint()}".encode())
+        digest.update(f"|fresnel:{FRESNEL_CLEARANCE:.2f}".encode())
         return digest.hexdigest()[:16]
 
     def save(self, path: str | Path) -> None:

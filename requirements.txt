@@ -1,0 +1,33 @@
+# Runtime dependencies -- what the live demo needs and nothing more.
+#
+#     pip install -r requirements.txt
+#     python -m uvicorn twinsync.server:app --port 8000
+#
+# Everything needed to *build* the data and train the models lives in
+# requirements-dev.txt. The demo machine does not need those: the DEM grid, the
+# scenario and the model artifacts are all committed to the repository, so this
+# file is enough to run the twin with no network connection at all.
+
+# -- web tier
+fastapi>=0.115
+uvicorn>=0.30
+websockets>=12.0
+
+# -- simulation core
+numpy>=1.26
+networkx>=3.2
+
+# -- edge inference
+#
+# onnxruntime runs the quantised anomaly model in edge/detector.py. If it is
+# missing the detector falls back to a per-tower sklearn IsolationForest, so the
+# demo still runs -- see edge/detector.py for the fallback path.
+onnxruntime>=1.17
+scikit-learn>=1.4
+
+# -- risk scoring
+#
+# The booster is loaded from models/risk_lgbm.txt. SHAP attributions are computed
+# via lightgbm's own pred_contrib, so the `shap` package is a training-time
+# dependency only.
+lightgbm>=4.0

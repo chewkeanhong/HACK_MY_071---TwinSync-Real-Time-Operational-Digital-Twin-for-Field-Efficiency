@@ -181,6 +181,10 @@ class RoadNetwork:
                 if float(np.hypot(*(midpoint - near))) > radius_m:
                     continue
             data["congestion"] = factor
+            # Remembered separately so a transient penalty applied on top -- flooding,
+            # which comes and goes with the storm cell -- can be lifted without also
+            # erasing the scenario's standing rush-hour jam.
+            data["scenario_congestion"] = factor
             data["time"] = data["base_time"] * factor
             affected += 1
         return affected
@@ -188,6 +192,8 @@ class RoadNetwork:
     def clear_congestion(self) -> None:
         for _, _, data in self.graph.edges(data=True):
             data["congestion"] = 1.0
+            data["scenario_congestion"] = 1.0
+            data["flooded"] = False
             data["time"] = data["base_time"]
 
     # -- routing ---------------------------------------------------------
