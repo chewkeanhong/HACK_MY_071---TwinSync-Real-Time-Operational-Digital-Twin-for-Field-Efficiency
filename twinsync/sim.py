@@ -13,7 +13,6 @@ import argparse
 import json
 import sys
 from dataclasses import dataclass, field
-from hashlib import sha1
 from pathlib import Path
 
 import numpy as np
@@ -107,10 +106,12 @@ class Simulation:
         self._apply_congestion()
 
     def _build_encroachment_risk(self) -> dict[str, float]:
-        """Static NDVI-style vegetation risk proxy for the prototype.
+        """Per-site vegetation pressure, from the baked Sentinel-2 NDVI observation.
 
-        In production this is expected to come from a Sentinel-2 pipeline. For v0.1 we use
-        deterministic static values so UI/API plumbing can be demonstrated offline.
+        Read from `data/ndvi.json` via `world.encroachment`, which falls back to the
+        hashed stand-in when no scene has been baked. A scenario may still override an
+        individual site, which is how a what-if ("suppose this compound had not been
+        cleared") is expressed without editing the observation.
         """
         configured = self.scenario.get("encroachment_risk") or {}
         risk: dict[str, float] = {}
@@ -118,8 +119,7 @@ class Simulation:
             if tower.id in configured:
                 value = float(configured[tower.id])
             else:
-                seed = int(sha1(tower.id.encode("utf-8")).hexdigest()[:8], 16)
-                value = 0.15 + ((seed % 70) / 100.0)
+                value = self.world.encroachment.risk_for(tower.id)
             risk[tower.id] = min(1.0, max(0.0, value))
         return risk
 
@@ -299,7 +299,10 @@ class Simulation:
                 digest["encroachment_risk"] = round(
                     100.0 * self.encroachment_risk.get(tower.id, 0.0), 1
                 )
-                digest["encroachment_source"] = "sentinel2-ndvi-simulated-v0.1"
+                digest["encroachment_source"] = self.world.encroachment.source_tag
+                ndvi = self.world.encroachment.ndvi_for(tower.id)
+                if ndvi is not None:
+                    digest["ndvi"] = round(ndvi, 3)
                 if conditions:
                     digest["rainfall_mm_hr"] = conditions["rainfall_mm_hr"]
                     digest["backhaul_fade_db"] = conditions.get("backhaul_fade_db", 0.0)

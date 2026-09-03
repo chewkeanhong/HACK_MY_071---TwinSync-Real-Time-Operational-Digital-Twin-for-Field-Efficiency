@@ -125,6 +125,12 @@ button.on { color: var(--bg); background: var(--ink); border-color: var(--ink); 
   line-height: 1.05;
 }
 .k-note { font-size: 10px; color: var(--ink-3); }
+
+/* The ROI tile is the one KPI you can argue with, so it is the one you can click:
+   cycling the assumed fleet size on screen beats asserting a number on a slide. */
+.kpi-click { cursor: pointer; }
+.kpi-click:hover { border-color: rgba(120, 140, 180, 0.42); }
+.kpi.roi .k-value { color: var(--good); }
 /* Status only ever lands on the number, and the note says why in words. */
 .kpi.alert .k-value { color: var(--crit); }
 .kpi.warn  .k-value { color: var(--warn); }
@@ -235,8 +241,13 @@ button.on { color: var(--bg); background: var(--ink); border-color: var(--ink); 
   border: 1px solid var(--border); border-radius: 9px;
 }
 
-/* Side by side: one caption per pane, each over its own half. */
-body.mode-split .sl { width: 44%; }
+/* Side by side: one caption per pane, each over its own half.
+
+   Dropped clear of the chaos panel, which is also pinned at 148px and centred: at
+   44% per side the two captions reach well past the middle of the screen, so at the
+   same height the inject bar lands on top of the 2D card -- in Compare, which is the
+   one view that ends up on a slide. */
+body.mode-split .sl { width: 44%; top: 206px; }
 body.mode-split .sl-left  { left: 3%; }
 body.mode-split .sl-right { right: 3%; text-align: right; }
 
@@ -341,4 +352,58 @@ body.mode-split .panel { max-height: 30vh; }
 @media (max-width: 1100px) {
   .chaos-inner { flex-wrap: wrap; max-width: 92vw; justify-content: center; }
   .chaos select { max-width: 130px; }
+}
+
+/* ------------------------------------------------------- guided demo track */
+
+/* Sits in the free strip between the two side panels (306px + 14px margin each), so it
+   can never cover the incident queue or the log. Same full-width-and-centre discipline
+   as .kpis: the container spans, the card inside it takes the pointer events. */
+.tour {
+  position: fixed; bottom: 44px; left: 334px; right: 334px;
+  display: flex; justify-content: center;
+  z-index: 11; pointer-events: none;
+}
+.tour[hidden] { display: none; }
+
+.tour-inner {
+  pointer-events: auto;
+  width: 100%; max-width: 620px;
+  padding: 12px 16px 10px;
+  background: var(--surface); backdrop-filter: blur(9px);
+  border: 1px solid var(--border); border-radius: 11px;
+  box-shadow: 0 10px 34px rgba(0, 0, 0, 0.45);
+}
+
+.tour-head { display: flex; align-items: center; gap: 10px; }
+
+.tour-tag {
+  font-size: 9px; text-transform: uppercase; letter-spacing: 0.16em;
+  color: var(--route);
+  border: 1px solid rgba(88, 166, 255, 0.4); border-radius: 4px; padding: 2px 7px;
+}
+.tour-step {
+  font-family: var(--mono); font-size: 10px; color: var(--ink-3);
+  font-variant-numeric: tabular-nums;
+}
+.tour-exit { margin-left: auto; padding: 3px 9px; font-size: 10px; }
+
+.tour h3 {
+  margin: 8px 0 4px; font-size: 16px; font-weight: 600; letter-spacing: 0.01em;
+}
+.tour p { margin: 0; font-size: 12px; line-height: 1.5; color: var(--ink-2); }
+
+/* Progress to the next beat. Reassurance that the track is still advancing during the
+   quiet stretches -- without it a 90-second beat reads as a frozen dashboard. */
+.tour-bar {
+  margin-top: 9px; height: 2px; border-radius: 2px;
+  background: rgba(120, 140, 180, 0.16); overflow: hidden;
+}
+.tour-bar i { display: block; height: 100%; width: 0; background: var(--route); }
+
+/* The split-mode verdict pill would land underneath the card; lift it clear. */
+body.demo-on .sl-verdict { bottom: 200px; }
+
+@media (max-width: 1100px) {
+  .tour { left: 14px; right: 14px; bottom: 38px; }
 }

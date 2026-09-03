@@ -216,3 +216,13 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Generated dashboard stills. Only the three the README embeds are committed;
+# the rest are regenerable with `python scripts/verify_ui.py <url> docs/shots --capture`.
+docs/shots/*
+!docs/shots/readme-*.png
+
+# Overpass tile cache. Regenerable, large, and only used to resume an interrupted
+# fetch -- the committed GeoJSON is the artifact.
+data/**/raw/
+data/raw/

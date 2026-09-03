@@ -44,6 +44,59 @@ TRUCK_ROLL_COST_MYR = 420.0
 SHIFT_HOURS = 8.0
 
 
+# Network size and fault rate the headline projection assumes. Both are arguments, not
+# findings, which is why they are named here and echoed back in every payload that uses
+# them -- a judge who thinks 2,000 sites is wrong can say so and see the number move.
+DEFAULT_SITES = 2000
+DEFAULT_INCIDENT_RATE = 4.0
+
+
+def project_annual(unit: dict, *, sites: int = DEFAULT_SITES,
+                   incidents_per_site_per_year: float = DEFAULT_INCIDENT_RATE) -> dict:
+    """Scale measured per-incident savings up to a network-year.
+
+    Split out from :meth:`RunComparison.annualised` so the same arithmetic serves both
+    the headless comparison and the live dashboard, which re-projects a saved run rather
+    than simulating a second arm on demand.
+    """
+    incidents = sites * incidents_per_site_per_year
+    return {
+        "assumed_sites": sites,
+        "assumed_incidents_per_site_per_year": incidents_per_site_per_year,
+        "implied_incidents_per_year": round(incidents),
+        "truck_rolls_avoided": round(unit["truck_rolls_avoided"] * incidents),
+        "cost_saved_myr": round(unit["cost_saved_myr"] * incidents),
+        "km_saved": round(unit["km_saved"] * incidents),
+        "co2_saved_tonnes": round(unit["co2_saved_kg"] * incidents / 1000.0, 2),
+        "subscriber_hours_saved": round(
+            unit["subscriber_minutes_saved"] * incidents / 60.0),
+    }
+
+
+def per_incident_from_results(results: dict) -> dict:
+    """Recover the per-incident savings from a serialised :class:`RunComparison`.
+
+    Prefers the exact `per_incident` block if the file carries one. The fallback divides
+    the run totals back out by the same denominator :meth:`RunComparison.per_incident`
+    used -- the baseline arm's resolved count -- which is only accurate to the two
+    decimal places `as_dict` rounds those totals to. That is fine for ringgit, where the
+    numbers are large and round, and visibly wrong for kilograms of CO2, where 2.948 kg
+    is serialised as 2.95 and comes back 0.07% high. Hence the exact block.
+    """
+    exact = results.get("per_incident")
+    if isinstance(exact, dict) and exact:
+        return dict(exact)
+
+    resolved = max(1, int(results.get("baseline", {}).get("incidents_resolved", 1)))
+    return {
+        "truck_rolls_avoided": results.get("truck_rolls_avoided", 0) / resolved,
+        "cost_saved_myr": results.get("cost_saved_myr", 0.0) / resolved,
+        "km_saved": results.get("km_saved", 0.0) / resolved,
+        "co2_saved_kg": results.get("co2_saved_kg", 0.0) / resolved,
+        "subscriber_minutes_saved": results.get("subscriber_minutes_saved", 0) / resolved,
+    }
+
+
 @dataclass
 class RunMetrics:
     """Outcome of one simulated run."""
@@ -283,8 +336,8 @@ class Comparison:
             "subscriber_minutes_saved": self.subscriber_minutes_saved / resolved,
         }
 
-    def annualised(self, *, sites: int = 2000,
-                   incidents_per_site_per_year: float = 4.0) -> dict:
+    def annualised(self, *, sites: int = DEFAULT_SITES,
+                   incidents_per_site_per_year: float = DEFAULT_INCIDENT_RATE) -> dict:
         """Project the measured per-incident savings onto a metro operator's network.
 
         The scaling chain is spelled out rather than collapsed into one number, because
@@ -301,19 +354,8 @@ class Comparison:
         without going through per-site rates is what produces the implausible numbers
         this method exists to avoid.
         """
-        incidents = sites * incidents_per_site_per_year
-        unit = self.per_incident()
-        return {
-            "assumed_sites": sites,
-            "assumed_incidents_per_site_per_year": incidents_per_site_per_year,
-            "implied_incidents_per_year": round(incidents),
-            "truck_rolls_avoided": round(unit["truck_rolls_avoided"] * incidents),
-            "cost_saved_myr": round(unit["cost_saved_myr"] * incidents),
-            "km_saved": round(unit["km_saved"] * incidents),
-            "co2_saved_tonnes": round(unit["co2_saved_kg"] * incidents / 1000.0, 2),
-            "subscriber_hours_saved": round(
-                unit["subscriber_minutes_saved"] * incidents / 60.0),
-        }
+        return project_annual(self.per_incident(), sites=sites,
+                              incidents_per_site_per_year=incidents_per_site_per_year)
 
     def as_dict(self) -> dict:
         return {
@@ -330,6 +372,9 @@ class Comparison:
             "cost_saved_myr": round(self.cost_saved_myr, 2),
             "sla_breaches_avoided": (self.baseline.sla_breaches
                                      - self.twinsync.sla_breaches),
+            # Unrounded, so anything re-projecting this file gets the same answer the
+            # in-process comparison would. Everything else here is rounded for reading.
+            "per_incident": self.per_incident(),
             "annualised": self.annualised(),
         }
 

@@ -14,6 +14,7 @@ from pathlib import Path
 import numpy as np
 
 from .geo import LocalFrame, PolygonSet, ring_area, ring_centroid, ring_perimeter
+from .encroachment import Encroachment
 from .terrain import Terrain
 
 STOREY_HEIGHT = 3.2
@@ -122,7 +123,8 @@ class World:
 
     def __init__(self, frame: LocalFrame, buildings: list[Building],
                  polygons: PolygonSet, towers: list[Tower],
-                 terrain: "Terrain | None" = None):
+                 terrain: "Terrain | None" = None,
+                 encroachment: "Encroachment | None" = None):
         self.frame = frame
         self.buildings = buildings
         self.polygons = polygons
@@ -130,6 +132,10 @@ class World:
         # Falls back to a flat surface so every terrain-aware path stays live and
         # simply concludes the ground is level -- the twin's pre-DEM behaviour.
         self.terrain = terrain if terrain is not None else Terrain.flat()
+        # No baked NDVI falls back to the hashed stand-in, which is what this was before
+        # there was an observation -- and which says so wherever it surfaces.
+        self.encroachment = (encroachment if encroachment is not None
+                             else Encroachment.hashed(t.id for t in towers))
         self._by_id = {b.id: b for b in buildings}
         self._tower_by_id = {t.id: t for t in towers}
 
@@ -197,6 +203,7 @@ class World:
 
         terrain_path = data_dir / "terrain.json"
         terrain = Terrain.load(terrain_path) if terrain_path.exists() else None
+        encroachment = Encroachment.load(data_dir / "ndvi.json")
 
         towers: list[Tower] = []
         towers_path = data_dir / "towers.geojson"
@@ -205,7 +212,7 @@ class World:
         elif require_towers:
             raise FileNotFoundError(f"{towers_path} not found -- run scripts/place_towers.py")
 
-        return cls(frame, buildings, polygons, towers, terrain)
+        return cls(frame, buildings, polygons, towers, terrain, encroachment)
 
     @staticmethod
     def _load_towers(path: Path, frame: LocalFrame) -> list[Tower]:

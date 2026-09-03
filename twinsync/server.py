@@ -266,18 +266,31 @@ async def get_models():
         "data": {
             "terrain": terrain.meta.describe() if terrain else "not loaded",
             "terrain_is_real": bool(terrain and terrain.meta.is_real),
-            "encroachment": "sentinel2-ndvi-simulated-v0.1 (SIMULATED stand-in)",
+            "encroachment": (engine.world.encroachment.describe()
+                             if engine.world is not None else "not loaded"),
+            "encroachment_is_real": bool(engine.world is not None
+                                         and engine.world.encroachment.is_real),
         },
         "degraded": engine.sim.intelligence.degraded if engine.sim else None,
     }
 
 
 @app.get("/api/metrics")
-async def get_metrics():
-    """Live KPI rollup for the dashboard tiles."""
+async def get_metrics(sites: int | None = None,
+                      incidents_per_site: float | None = None):
+    """Live KPI rollup for the dashboard tiles, plus the A/B saving.
+
+    The live server runs one arm, so the comparison cannot be measured here -- it comes
+    from `data/results.json`, written by the headless run that plays the identical
+    scenario through both dispatch modes. Only the *projection* is recomputed, which is
+    what `sites` and `incidents_per_site` are for: the two multipliers are assumptions
+    rather than findings, so a judge who disagrees with 2,000 sites can say so and watch
+    the number move instead of being told to trust it.
+    """
     if engine.sim is None:
         return JSONResponse({"error": "not ready"}, status_code=503)
-    from .metrics import collect
+    from .metrics import (DEFAULT_INCIDENT_RATE, DEFAULT_SITES, collect,
+                          per_incident_from_results, project_annual)
 
     sim = engine.sim
     run = collect("live", sim.dispatch, sla_minutes=sim.sla_minutes,
@@ -285,7 +298,31 @@ async def get_metrics():
                   events_uplinked=sim.events_uplinked,
                   elapsed_seconds=sim.t,
                   total_subscribers=sim.world.total_subscribers)
-    return run.as_dict()
+    payload = run.as_dict()
+
+    results_path = DATA_DIR / "results.json"
+    if results_path.exists():
+        saved = json.loads(results_path.read_text(encoding="utf-8"))
+        unit = per_incident_from_results(saved)
+        payload["ab"] = {
+            "source": "data/results.json",
+            "note": ("measured A/B: identical scenario, seed, world and crews, run "
+                     "through baseline dispatch and TwinSync dispatch"),
+            "truck_rolls_avoided": saved.get("truck_rolls_avoided"),
+            "cost_saved_myr": saved.get("cost_saved_myr"),
+            "km_saved": saved.get("km_saved"),
+            "mttr_improvement_pct": saved.get("mttr_improvement_pct"),
+            "mttd_improvement_pct": saved.get("mttd_improvement_pct"),
+            "per_incident": {k: round(v, 3) for k, v in unit.items()},
+            "annualised": project_annual(
+                unit,
+                sites=max(1, int(sites if sites is not None else DEFAULT_SITES)),
+                incidents_per_site_per_year=float(
+                    incidents_per_site if incidents_per_site is not None
+                    else DEFAULT_INCIDENT_RATE),
+            ),
+        }
+    return payload
 
 
 @app.get("/api/terrain")
@@ -294,6 +331,20 @@ async def get_terrain():
     path = DATA_DIR / "terrain.json"
     if not path.exists():
         return JSONResponse({"error": "no terrain baked"}, status_code=404)
+    return FileResponse(path, media_type="application/json")
+
+
+@app.get("/api/demo")
+async def get_demo():
+    """The guided-demo beat track.
+
+    Optional: a repo without one still runs, the button just stays disabled. The beats
+    only narrate -- they never inject a fault or a storm -- so the guided run is the
+    scripted scenario every time, which is the point of having it.
+    """
+    path = DATA_DIR / "demo.json"
+    if not path.exists():
+        return JSONResponse({"error": "no demo track"}, status_code=404)
     return FileResponse(path, media_type="application/json")
 
 

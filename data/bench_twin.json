@@ -1,0 +1,102 @@
+{
+  "measured_at": "2026-09-02T21:15:00+0800",
+  "platform": {
+    "processor": "AMD64 Family 25 Model 97 Stepping 2, AuthenticAMD",
+    "system": "Windows 11",
+    "python": "3.14.4"
+  },
+  "buildings": 2074,
+  "frame_hz": 4.0,
+  "rows": [
+    {
+      "sites": 15,
+      "coverage_precompute_ms": 26275.7,
+      "stdbscan": {
+        "p50_ms": 0.067,
+        "p95_ms": 0.074,
+        "max_ms": 0.081,
+        "runs": 24
+      },
+      "step": {
+        "p50_ms": 0.885,
+        "p95_ms": 1.447,
+        "max_ms": 1.633,
+        "runs": 24
+      },
+      "snapshot": {
+        "p50_ms": 0.015,
+        "p95_ms": 0.026,
+        "max_ms": 0.026,
+        "runs": 20
+      },
+      "dispatch_all_incidents": {
+        "p50_ms": 1896.338,
+        "p95_ms": 2005.536,
+        "max_ms": 2005.536,
+        "runs": 3
+      },
+      "frame_ms_p95": 1.473,
+      "frame_budget_pct": 0.59
+    },
+    {
+      "sites": 45,
+      "coverage_precompute_ms": 135183.9,
+      "stdbscan": {
+        "p50_ms": 0.337,
+        "p95_ms": 0.361,
+        "max_ms": 0.443,
+        "runs": 24
+      },
+      "step": {
+        "p50_ms": 2.644,
+        "p95_ms": 4.254,
+        "max_ms": 4.467,
+        "runs": 24
+      },
+      "snapshot": {
+        "p50_ms": 0.017,
+        "p95_ms": 0.029,
+        "max_ms": 0.029,
+        "runs": 20
+      },
+      "dispatch_all_incidents": {
+        "p50_ms": 6155.212,
+        "p95_ms": 6157.281,
+        "max_ms": 6157.281,
+        "runs": 3
+      },
+      "frame_ms_p95": 4.283,
+      "frame_budget_pct": 1.71
+    },
+    {
+      "sites": 90,
+      "coverage_precompute_ms": 327936.4,
+      "stdbscan": {
+        "p50_ms": 1.189,
+        "p95_ms": 2.195,
+        "max_ms": 2.2,
+        "runs": 24
+      },
+      "step": {
+        "p50_ms": 5.326,
+        "p95_ms": 8.802,
+        "max_ms": 8.867,
+        "runs": 24
+      },
+      "snapshot": {
+        "p50_ms": 0.019,
+        "p95_ms": 0.025,
+        "max_ms": 0.025,
+        "runs": 20
+      },
+      "dispatch_all_incidents": {
+        "p50_ms": 9827.101,
+        "p95_ms": 9897.861,
+        "max_ms": 9897.861,
+        "runs": 3
+      },
+      "frame_ms_p95": 8.827,
+      "frame_budget_pct": 3.53
+    }
+  ]
+}

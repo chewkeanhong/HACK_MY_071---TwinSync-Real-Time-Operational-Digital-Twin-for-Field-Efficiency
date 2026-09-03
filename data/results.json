@@ -60,6 +60,13 @@
   "co2_saved_kg": 0.73,
   "cost_saved_myr": 420.0,
   "sla_breaches_avoided": 0,
+  "per_incident": {
+    "truck_rolls_avoided": 0.3333333333333333,
+    "cost_saved_myr": 140.0,
+    "km_saved": 0.8286295463628374,
+    "co2_saved_kg": 0.24427999026776437,
+    "subscriber_minutes_saved": 14518.381111098084
+  },
   "annualised": {
     "assumed_sites": 2000,
     "assumed_incidents_per_site_per_year": 4.0,

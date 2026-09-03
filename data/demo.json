@@ -1,0 +1,107 @@
+{
+  "name": "TwinSync guided demo — KL CBD, three acts",
+  "note": "Beats narrate the timeline already authored in scenario.json. Nothing here injects a fault or a storm: the scripted run is the source of truth, so the same keystroke gives the same demo every time. The chaos panel stays the manual override for questions asked off-script.",
+  "speed": 8,
+  "beats": [
+    {
+      "t_s": 0,
+      "tag": "setup",
+      "title": "A city with a Z axis",
+      "body": "2,074 OSM footprints, extruded to height, standing on a Copernicus GLO-30 elevation grid. 15 telecom sites. Every tower runs a 3 KB ONNX anomaly model locally.",
+      "say": "This is Kuala Lumpur's CBD as our twin sees it — not a flat map, a city with height.",
+      "view": "3d"
+    },
+    {
+      "t_s": 45,
+      "tag": "setup",
+      "title": "Events, not telemetry",
+      "body": "The edge agents uplink state changes only. Watch the uplink tile: raw telemetry would be tens of megabytes; we send under a megabyte.",
+      "say": "Nothing is wrong yet. Notice what the network is not sending.",
+      "view": "3d"
+    },
+    {
+      "t_s": 185,
+      "tag": "act 1",
+      "title": "A rooftop amplifier starts cooking",
+      "body": "KL-03. EWMA and Mahalanobis flag it at full rate; the ONNX autoencoder confirms on its duty cycle. Detected in 2.4 seconds — before a single customer has called.",
+      "say": "Act one. The edge caught this in two and a half seconds.",
+      "view": "3d",
+      "focus": "KL-03"
+    },
+    {
+      "t_s": 245,
+      "tag": "act 1",
+      "title": "But who actually lost service?",
+      "body": "Left: the flat coverage model dispatch uses today. Right: true line of sight, ray-cast against terrain and buildings at 60% Fresnel clearance. Same instant, same fault — read the verdict bar.",
+      "say": "Here is the whole argument. Same fault, two models of the world.",
+      "view": "split"
+    },
+    {
+      "t_s": 335,
+      "tag": "act 2",
+      "title": "A second fault, 1.7 minutes away",
+      "body": "KL-13, while the crew is still en route to KL-03. ST-DBSCAN groups them in space, time and fault family — one cluster, one trip.",
+      "say": "A second site fails nearby. The clustering folds it into the same journey.",
+      "view": "3d",
+      "focus": "KL-13"
+    },
+    {
+      "t_s": 430,
+      "tag": "act 2",
+      "title": "One truck roll instead of two",
+      "body": "Batching removes the second roll — and makes the second job wait. The mean improves, the p90 gets worse. We show both, because an operator would want to know.",
+      "say": "That saves a truck. It also costs the second job some time, and we report that.",
+      "view": "3d"
+    },
+    {
+      "t_s": 610,
+      "tag": "act 3",
+      "title": "The monsoon arrives",
+      "body": "ITU-R P.838 rain fade applied to the 18 GHz backhaul — and deliberately not to the 2.1 GHz access carrier, where it would be a fabricated effect an RF engineer would catch.",
+      "say": "Act three. A convective cell drifts across the CBD.",
+      "view": "3d"
+    },
+    {
+      "t_s": 665,
+      "tag": "act 3",
+      "title": "Three sources, one decision",
+      "body": "The DEM says which road segments sit in the bottom decile of elevation. The storm says where rain is falling now. OSM says which of those are on the crew's route. Travel time reprices, A* reroutes, a different crew wins the job.",
+      "say": "This is where the fusion actually changes something — watch the cyan segments and the routes.",
+      "view": "3d"
+    },
+    {
+      "t_s": 710,
+      "tag": "act 3",
+      "title": "A third fault — and it is unrelated",
+      "body": "KL-09 is too far from the other two in space and time, so ST-DBSCAN labels it ISOLATED rather than folding it in. A label generator could not make that distinction.",
+      "say": "The clustering says this one is on its own. That is a real decision, not a sticker.",
+      "view": "3d",
+      "focus": "KL-09"
+    },
+    {
+      "t_s": 815,
+      "tag": "the point",
+      "title": "The flat map says the next cell has them",
+      "body": "It does not raise a false alarm. It reports a handful of buildings dark and concludes the neighbouring site is covering the rest -- and it is wrong, because a 200 m tower stands in the way. The verdict bar counts exactly who that leaves off the air.",
+      "say": "Back to the comparison. The flat map is not alarming -- it is reassuring, and that is worse.",
+      "view": "split"
+    },
+    {
+      "t_s": 1155,
+      "tag": "act 4",
+      "title": "The site nobody can ignore",
+      "body": "The transit-hub site loses power entirely -- the largest subscriber base on the network. Every crew is already committed, so this one preempts: dispatch pulls a crew off a smaller job mid-route.",
+      "say": "And now the one that changes the shape of the day. Watch a crew get pulled off its job.",
+      "view": "3d",
+      "focus": "KL-06"
+    },
+    {
+      "t_s": 1400,
+      "tag": "close",
+      "title": "What the flat map never saw",
+      "body": "All four sites down. True line of sight says 47 buildings and 9,026 subscribers are off the air; the flat model says 3. Same scenario, same seed, both dispatch arms -- a controlled experiment, not a claim.",
+      "say": "Nine thousand and twenty-three people the flat map is quietly confident are fine.",
+      "view": "split"
+    }
+  ]
+}

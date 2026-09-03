@@ -36,6 +36,9 @@
       <button id="btn-view-split" class="seg-btn"
               title="Both models side by side, same instant (3)">Compare</button>
     </div>
+    <button id="btn-demo" title="Replay the scripted incident from the top, with captions (D)">
+      Guided demo
+    </button>
     <label class="speed" title="Simulated seconds per wall-clock second">
       <span id="speed-label">12&times;</span>
       <input type="range" id="speed" min="1" max="60" step="1" value="12">
@@ -94,6 +97,12 @@
     <span class="k-value" id="kpi-rolls">0</span>
     <span class="k-note" id="kpi-rolls-note">0.0 km &middot; 0.0 kg CO&#8322;</span>
   </div>
+  <div class="kpi kpi-click" id="kpi-roi-tile"
+       title="Projected from the measured A/B run. Click to change the assumed fleet size.">
+    <span class="k-label">annualised saving</span>
+    <span class="k-value" id="kpi-roi">&mdash;</span>
+    <span class="k-note" id="kpi-roi-note">projected from the A/B run</span>
+  </div>
   <div class="kpi" id="kpi-weather-tile">
     <span class="k-label">weather</span>
     <span class="k-value" id="kpi-weather">clear</span>
@@ -118,6 +127,21 @@
   </div>
   <div class="sl-verdict" id="sl-verdict">waiting for a fault&hellip;</div>
 </div>
+
+<!-- Guided demo caption track. Narrates the scripted timeline so the pitch does not
+     depend on remembering it; sits in the free strip between the two side panels. -->
+<section class="tour" id="tour" hidden>
+  <div class="tour-inner">
+    <div class="tour-head">
+      <span class="tour-tag" id="tour-tag">setup</span>
+      <span class="tour-step" id="tour-step">1 / 1</span>
+      <button class="tour-exit" id="tour-exit" title="Leave guided mode (Esc)">exit</button>
+    </div>
+    <h3 id="tour-title">Guided demo</h3>
+    <p id="tour-body"></p>
+    <div class="tour-bar"><i id="tour-progress"></i></div>
+  </div>
+</section>
 
 <!-- Incident queue, ranked by impact -->
 <aside class="panel panel-left">

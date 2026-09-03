@@ -572,7 +572,7 @@ function tooltip({object, layer}) {
         ? `<br>rain ${d.rainfall_mm_hr} mm/hr · backhaul fade ${d.backhaul_fade_db} dB
            (${Math.round(100 * d.backhaul_capacity)}% capacity)`
         : '') +
-      (d ? `<br>encroachment risk (NDVI sim): ${d.encroachment_risk}%` : '') +
+      (d ? encroachmentHtml(d) : '') +
       riskFactorsHtml(p.id)};
   }
   if (layer.id.endsWith('crews')) {
@@ -591,6 +591,22 @@ function tooltip({object, layer}) {
  * numbers differ per tower and change as conditions change. The previous version of
  * this was a hardcoded string that read identically on every site -- which is exactly
  * the tell a judge looks for. */
+/* Vegetation encroachment, and where the number came from.
+ *
+ * This used to read "(NDVI sim)" on every site because it was a hash of the site id.
+ * It is now a median NDVI over a feeder-corridor buffer from a named Sentinel-2 scene,
+ * so the tooltip shows the measurement and the scene rather than a bare percentage --
+ * and still says "simulated" plainly on a repo with no scene baked. */
+function encroachmentHtml(digest) {
+  const simulated = (digest.encroachment_source || '').includes('simulated');
+  const label = simulated ? 'encroachment risk (SIMULATED)' : 'encroachment risk';
+  const ndvi = digest.ndvi != null
+    ? ` · NDVI ${digest.ndvi.toFixed(2)}` : '';
+  const scene = simulated || !digest.encroachment_source ? ''
+    : `<br><span style="font-size:10px;opacity:.6">${digest.encroachment_source}</span>`;
+  return `<br>${label}: ${digest.encroachment_risk}%${ndvi}${scene}`;
+}
+
 function riskFactorsHtml(towerId) {
   const incident = (state?.incidents || []).find((i) => i.tower === towerId);
   if (!incident || !incident.ai_risk_factors?.length) return '';
@@ -606,6 +622,49 @@ function riskFactorsHtml(towerId) {
           <b>${incident.ai_risk_score.toFixed(1)}%</b> (${incident.ai_risk_band})</span>` +
          `<br><span style="font-size:11px;opacity:.8">SHAP: ${rows}</span>`;
 }
+
+/* The annualised saving, projected from the committed A/B run.
+ *
+ * It cannot come off the WebSocket: the live server runs one dispatch arm, so there is
+ * no baseline to compare against in-process. /api/metrics reads the headless A/B result
+ * and re-projects it, which also means the two multipliers behind the headline -- fleet
+ * size and fault rate -- are inputs rather than a fixed claim. Clicking the tile cycles
+ * them, so "we have five thousand sites" is a thing a judge can watch happen. */
+const ROI_FLEETS = [2000, 5000, 10000, 500];
+let roiFleet = 0;
+let roi = null;
+
+async function loadRoi() {
+  const sites = ROI_FLEETS[roiFleet];
+  try {
+    const body = await (await fetch(`/api/metrics?sites=${sites}`)).json();
+    roi = body.ab?.annualised || null;
+  } catch (err) {
+    roi = null;
+  }
+  renderRoi();
+}
+
+function renderRoi() {
+  const tile = $('kpi-roi-tile');
+  if (!roi) {
+    $('kpi-roi').textContent = '—';
+    $('kpi-roi-note').textContent = 'no A/B result baked';
+    return;
+  }
+  const myr = roi.cost_saved_myr;
+  $('kpi-roi').textContent = myr >= 1e6
+    ? `RM ${(myr / 1e6).toFixed(2)}M`
+    : `RM ${fmt(Math.round(myr / 1000))}k`;
+  $('kpi-roi-note').textContent =
+    `${fmt(roi.assumed_sites)} sites · ${fmt(roi.truck_rolls_avoided)} rolls avoided`;
+  tile.classList.add('roi');
+}
+
+$('kpi-roi-tile').addEventListener('click', () => {
+  roiFleet = (roiFleet + 1) % ROI_FLEETS.length;
+  loadRoi();
+});
 
 function renderKpis() {
   if (!state) return;
@@ -744,8 +803,24 @@ function renderLog() {
   logSeen = state.event_count;
 }
 
+/* Simulated time of the previous frame, used only to notice that the clock went
+ * backwards. Clearing the log inside the Reset handler is not enough on its own: the
+ * reset is a round trip, and a frame from the old run posted just before it lands
+ * repaints the log and carries `logSeen` up to the old run's event count -- after which
+ * every event of the new run has a lower id and is skipped, so the log sits frozen on
+ * the previous run for the whole demo while the clock reads 00:57. */
+let lastT = -1;
+
 function render() {
   if (!state) return;
+
+  if (state.t < lastT - 0.5) {
+    $('log').innerHTML = '';
+    logSeen = 0;
+    trails.clear();
+  }
+  lastT = state.t;
+
   // The outage set drives the single most important thing on screen -- buildings going
   // red. It is rebuilt from the pushed state every frame; deriving it anywhere else
   // would let the map disagree with the incident panel.
@@ -759,6 +834,7 @@ function render() {
   renderCrews();
   renderLog();
   renderSplitReadout();
+  updateDemo();
   deckgl.setProps({layers: buildLayers()});
 }
 
@@ -783,12 +859,21 @@ function renderSplitReadout() {
 /* ------------------------------------------------------------------ camera */
 
 function flyTo(coords, zoom) {
+  const to = {longitude: coords[0], latitude: coords[1], transitionDuration: 1600};
+  const tilted = (z) => ({...to, zoom: z, pitch: 56, bearing: -18});
+  const flat   = (z) => ({...to, zoom: z, pitch: 0,  bearing: 0});
+
+  // Keyed by view id, as currentViewState() does. A flat object here would be applied
+  // to every view, which in split mode tilts the 2D pane -- and a tilted "flat map"
+  // pane quietly throws away the entire comparison the mode exists to draw.
+  if (viewMode === 'split') {
+    const z = (zoom ?? 15.1) - 1.4;         // half the width, so pull back
+    deckgl.setProps({initialViewState: {'2d': flat(z), '3d': tilted(z)}});
+    return;
+  }
+  const z = zoom ?? 15.1;
   deckgl.setProps({
-    initialViewState: {
-      longitude: coords[0], latitude: coords[1],
-      zoom: zoom ?? 15.1, pitch: 56, bearing: -18,
-      transitionDuration: 1600,
-    },
+    initialViewState: {[viewMode]: viewMode === '2d' ? flat(z) : tilted(z)},
   });
 }
 
@@ -853,6 +938,23 @@ async function boot() {
   } catch (err) {
     console.info('no terrain grid available, drawing flat ground');
   }
+
+  // The demo track is optional: without it the button simply stays disabled.
+  try {
+    const track = await (await fetch('/api/demo')).json();
+    if (track && Array.isArray(track.beats) && track.beats.length) {
+      demoTrack = track;
+      demoTrack.beats.sort((a, b) => a.t_s - b.t_s);
+    }
+  } catch (err) {
+    console.info('no guided demo track available');
+  }
+  if (!demoTrack) {
+    $('btn-demo').disabled = true;
+    $('btn-demo').title = 'No demo track baked (data/demo.json)';
+  }
+
+  loadRoi();
 
   document.body.classList.add(`mode-${viewMode}`);
 
@@ -973,6 +1075,96 @@ $('speed').addEventListener('change', async (e) => {
   await fetch(`/api/control/speed?factor=${e.target.value}`, {method: 'POST'});
 });
 
+/* -------------------------------------------------------------- guided demo */
+
+/* A caption track over the scripted scenario.
+ *
+ * The cascade is worth about ninety seconds of narration and it is easy to fumble under
+ * lights. The beats in data/demo.json are keyed to *simulated* time, so they land on the
+ * same events every run, and they only narrate -- no beat injects a fault or a storm.
+ * The scripted timeline stays the single source of truth, and the chaos panel stays the
+ * manual override for whatever a judge asks off-script.
+ */
+let demoTrack = null;
+let demoOn = false;
+let demoBeat = -1;
+/* The reset is a round trip, so frames from the old run keep arriving for a moment
+ * afterwards. Without this the track would jump to its last beat and snap back. */
+let demoAwaitingReset = false;
+
+async function startDemo() {
+  if (!demoTrack) return;
+
+  await fetch('/api/control/reset', {method: 'POST'}).catch(() => null);
+  $('log').innerHTML = '';
+  logSeen = 0;
+  trails.clear();
+  paused = false;
+  setPausedLabel();
+
+  // Slow the clock down: at 12x the three acts are over before they can be described.
+  const speed = demoTrack.speed || 8;
+  await fetch(`/api/control/speed?factor=${speed}`, {method: 'POST'}).catch(() => null);
+  $('speed').value = speed;
+  $('speed-label').innerHTML = `${speed}&times;`;
+
+  demoOn = true;
+  demoBeat = -1;
+  demoAwaitingReset = true;
+  document.body.classList.add('demo-on');
+  $('tour').hidden = false;
+  $('btn-demo').classList.add('on');
+}
+
+function stopDemo() {
+  demoOn = false;
+  demoAwaitingReset = false;
+  document.body.classList.remove('demo-on');
+  $('tour').hidden = true;
+  $('btn-demo').classList.remove('on');
+}
+
+function applyBeat(index) {
+  const beat = demoTrack.beats[index];
+  demoBeat = index;
+
+  $('tour-tag').textContent = beat.tag || '';
+  $('tour-step').textContent = `${index + 1} / ${demoTrack.beats.length}`;
+  $('tour-title').textContent = beat.title;
+  $('tour-body').textContent = beat.body;
+
+  if (beat.view) setViewMode(beat.view);
+  if (beat.focus && world) {
+    const tower = world.towers.features.find((f) => f.properties.id === beat.focus);
+    if (tower) flyTo(tower.geometry.coordinates, 15.6);
+  }
+}
+
+function updateDemo() {
+  if (!demoOn || !demoTrack || !state) return;
+
+  const beats = demoTrack.beats;
+  if (demoAwaitingReset) {
+    // Wait for the clock to actually be back at the top before reading beats off it.
+    if (state.t > beats[Math.min(1, beats.length - 1)].t_s) return;
+    demoAwaitingReset = false;
+  }
+
+  let active = 0;
+  for (let i = 0; i < beats.length; i++) {
+    if (state.t >= beats[i].t_s) active = i;
+  }
+  if (active !== demoBeat) applyBeat(active);
+
+  const from = beats[active].t_s;
+  const to = beats[active + 1] ? beats[active + 1].t_s : from + 120;
+  const pct = Math.max(0, Math.min(1, (state.t - from) / Math.max(1, to - from)));
+  $('tour-progress').style.width = `${(100 * pct).toFixed(1)}%`;
+}
+
+$('btn-demo').addEventListener('click', () => (demoOn ? stopDemo() : startDemo()));
+$('tour-exit').addEventListener('click', stopDemo);
+
 /* Mode switching. Also bound to 1/2/3 so the pitch can be driven without hunting
    for a button while talking. */
 $('btn-view-2d').addEventListener('click', () => setViewMode('2d'));
@@ -989,6 +1181,8 @@ window.addEventListener('keydown', (e) => {
   // button. Lowercase only, to leave shifted keys free.
   else if (e.key === 's') $('btn-storm').click();
   else if (e.key === 'f') $('btn-fault').click();
+  else if (e.key === 'd') $('btn-demo').click();
+  else if (e.key === 'Escape' && demoOn) stopDemo();
 });
 
 boot();
