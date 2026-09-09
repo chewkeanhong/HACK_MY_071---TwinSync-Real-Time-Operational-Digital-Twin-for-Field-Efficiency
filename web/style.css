@@ -344,6 +344,24 @@ body.mode-split .panel { max-height: 30vh; }
 .chaos-status { font-size: 11px; color: var(--good); min-width: 140px; }
 .chaos-status.bad { color: var(--crit); }
 
+.chaos-flood {
+  display: flex; align-items: center; gap: 6px;
+  font-size: 11px; opacity: 0.85;
+}
+.chaos-flood input[type="range"] { width: 96px; accent-color: #46becf; }
+.chaos-flood span { font-variant-numeric: tabular-nums; min-width: 46px; }
+
+/* The transport strip sits under the inject row rather than inside it: it is a readout,
+   not a control, and mixing the two made the panel read as one long toolbar. */
+.chaos { flex-direction: column; }
+.cascade-strip { margin-top: 6px; }
+
+.cascade-note {
+  font-size: 11px; color: var(--good);
+  font-variant-numeric: tabular-nums;
+}
+.cascade-note.bad { color: var(--warn); }
+
 /* Speed slider sits in the header controls. */
 .speed { display: flex; align-items: center; gap: 6px; font-size: 11px; opacity: 0.85; }
 .speed input { width: 84px; accent-color: #58a6ff; cursor: pointer; }

@@ -66,7 +66,20 @@
       <button id="btn-fault" class="chaos-btn fault"
               title="Fail this tower now (F)">Tower outage</button>
     </div>
+    <div class="chaos-fault">
+      <select id="blackout-tower" aria-label="Site to black out"></select>
+      <button id="btn-blackout" class="chaos-btn fault"
+              title="Cut mains and start the battery countdown (B)">Power cut</button>
+    </div>
+    <label class="chaos-flood" title="Raise standing water above the drainage line (W)">
+      flood <span id="flood-label">+0.0 m</span>
+      <input type="range" id="flood" min="0" max="30" step="1" value="0">
+    </label>
     <span class="chaos-status" id="chaos-status"></span>
+  </div>
+  <div class="chaos-inner cascade-strip">
+    <span class="chaos-label">transport</span>
+    <span class="cascade-note" id="cascade-note">transport nominal</span>
   </div>
 </section>
 

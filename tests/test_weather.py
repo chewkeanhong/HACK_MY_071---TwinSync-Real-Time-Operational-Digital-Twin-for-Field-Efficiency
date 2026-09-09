@@ -221,6 +221,48 @@ def test_light_rain_does_not_flood(tmp_path):
     assert drizzle.flooded_segments(network, terrain, 500.0) == 0
 
 
+def test_rain_driven_flooding_matches_the_water_level_model(tmp_path):
+    """The two flood paths are one path. This is the test that says so.
+
+    `flooded_segments` no longer writes to edges itself: it turns rain into a water
+    level plus a spatial mask and hands both to `RoadNetwork.set_water_level`, which is
+    the only writer left. With FLOOD_RISE_PER_MM at zero that level is the low-lying
+    threshold, so the two must reprice exactly the same edges -- and if they ever
+    diverge, the committed A/B figures have moved with them.
+    """
+    terrain = build_terrain()
+    field = WeatherField([cell(peak_mm_hr=140.0, radius_m=4000.0, drift_kmh=0.0)])
+
+    (tmp_path / "a").mkdir()
+    via_rain = build_network(tmp_path / "a")
+    field.flooded_segments(via_rain, terrain, 500.0)
+    rain_flooded = {(a, b) for a, b, d in via_rain.graph.edges(data=True)
+                    if d.get("flooded")}
+
+    (tmp_path / "b").mkdir()
+    via_level = build_network(tmp_path / "b")
+    via_level.attach_terrain(terrain)
+    via_level.set_water_level(terrain.low_lying_threshold)
+    level_flooded = {(a, b) for a, b, d in via_level.graph.edges(data=True)
+                     if d.get("flooded")}
+
+    assert rain_flooded
+    assert rain_flooded == level_flooded
+
+
+def test_flooding_records_depth_for_the_dashboard(tmp_path):
+    """Binary "flooded" was all the UI could draw. Depth is what makes it legible."""
+    terrain = build_terrain()
+    network = build_network(tmp_path)
+    field = WeatherField([cell(peak_mm_hr=140.0, radius_m=4000.0, drift_kmh=0.0)])
+    field.flooded_segments(network, terrain, 500.0)
+
+    depths = [d["water_depth_m"] for _, _, d in network.graph.edges(data=True)
+              if d.get("flooded")]
+    assert depths and all(depth >= 0.0 for depth in depths)
+    assert max(depths) > 0.0
+
+
 def test_active_cells_reports_only_live_ones():
     field = WeatherField([cell(start_s=100.0, duration_s=200.0)])
     assert field.active_cells(50.0) == []

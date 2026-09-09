@@ -25,7 +25,7 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
-from .routing import RoadNetwork
+from .routing import DRY, RoadNetwork
 from .sim import Simulation, load_all
 
 DATA_DIR = Path(os.environ.get("TWINSYNC_DATA", "data"))
@@ -62,7 +62,8 @@ class Engine:
 
     def reset(self) -> None:
         # A fresh road network per run so congestion from a previous run cannot persist.
-        network = RoadNetwork.load(DATA_DIR / "roads.geojson", self.world.frame)
+        network = RoadNetwork.load(DATA_DIR / "roads.geojson", self.world.frame,
+                                   terrain=self.world.terrain)
         self.sim = Simulation(self.world, self.coverage, network, self.scenario,
                               smart=True, seed=int(self.scenario.get("seed", 42)))
         self.paused = False
@@ -83,6 +84,10 @@ class Engine:
             "centre": {"lon": sum(lons) / len(lons), "lat": sum(lats) / len(lats)},
             "scenario": self.scenario,
             "total_subscribers": self.world.total_subscribers,
+            # Transport topology is static, so it belongs in the one-off payload
+            # rather than in a frame the socket repeats four times a second.
+            "asset_graph": self.world.asset_graph.to_dict(self.world.frame,
+                                                          self.world.towers),
         }
 
     async def broadcast(self, payload: dict) -> None:
@@ -219,6 +224,118 @@ async def spawn_storm(radius_m: float = 1600.0, peak_mm_hr: float = 95.0,
                  f"({peak_mm_hr:.0f} mm/hr, {radius_m / 1000:.1f} km)")
 
     return {"ok": True, "cells": len(sim.weather.cells), "peak_mm_hr": peak_mm_hr}
+
+
+@app.post("/api/flood")
+async def set_flood(surcharge_m: float = 0.6, graded: bool = True):
+    """Raise standing water to ``surcharge_m`` above the drainage line.
+
+    The storm route to flooding is realistic but slow: a cell has to drift in before
+    anything gets wet. This drives the water level directly, which is what makes the
+    flood-adaptive routing demonstrable on demand rather than on the weather's
+    schedule. Pass a negative surcharge to drain the roads again.
+    """
+    if engine.sim is None:
+        return JSONResponse({"error": "not ready"}, status_code=503)
+
+    sim = engine.sim
+    network = sim.network
+    if network.flood_source == "no-dem":
+        return JSONResponse(
+            {"error": "flood routing needs a DEM -- run scripts/fetch_dem.py"},
+            status_code=409)
+
+    async with engine._lock:
+        draining = surcharge_m < 0.0
+        level = DRY if draining else network.surcharge_to_level(surcharge_m)
+        wet = network.set_water_level(level, graded=graded)
+        sim.flooded_segments = wet
+        # Hold the level against the periodic rain scan, which would otherwise drain it
+        # at the next check. A live storm cell still takes over -- real weather beats a
+        # slider -- but an empty sky must not.
+        sim.operator_water_level = None if draining else level
+        sim._last_flood_check = sim.t
+        sim._log("FLOOD operator drained the roads" if draining else
+                 f"FLOOD operator set water to +{surcharge_m:.2f} m above the drainage "
+                 f"line -- {wet} road segments under water")
+
+    # A drained network sits at DRY, which is -inf and not representable in JSON.
+    return {"ok": True, "surcharge_m": surcharge_m,
+            "water_level": None if draining else round(level, 2),
+            "flood_datum": round(network.flood_datum, 2), "flooded_segments": wet,
+            "graded": graded}
+
+
+@app.post("/api/blackout/{tower_id}")
+async def blackout(tower_id: str, minutes: float | None = None):
+    """Cut mains to a site and start its battery countdown.
+
+    The cascade's trigger. With realistic autonomy nothing goes dark inside a demo, so
+    pass a short ``minutes`` to watch the blackout and the wave behind it actually
+    happen.
+    """
+    if engine.sim is None:
+        return JSONResponse({"error": "not ready"}, status_code=503)
+    try:
+        async with engine._lock:
+            autonomy = engine.sim.put_on_battery(tower_id, minutes=minutes)
+    except KeyError:
+        return JSONResponse({"error": f"unknown tower {tower_id}"}, status_code=400)
+    return {"ok": True, "tower": tower_id, "autonomy_s": autonomy}
+
+
+@app.get("/api/cascade/{tower_id}")
+async def cascade(tower_id: str):
+    """What would go dark if this site failed, without actually failing it."""
+    if engine.sim is None:
+        return JSONResponse({"error": "not ready"}, status_code=503)
+    sim = engine.sim
+    if tower_id not in sim.world.asset_graph.graph:
+        return JSONResponse({"error": f"unknown tower {tower_id}"}, status_code=404)
+
+    impact = sim.world.calculate_cascade_impact(
+        tower_id,
+        already_failed=sim.failed_towers,
+        on_battery=sim.battery_started_at.keys(),
+        battery_remaining_s=sim.battery_remaining_s(),
+    )
+    subscribers = sim.coverage.subscribers_affected(
+        sim.coverage.outage(set(impact.dark)))
+    return {
+        "tower": tower_id,
+        "tier": sim.world.asset_graph.tier.get(tower_id),
+        "dark": list(impact.dark),
+        "isolated": list(impact.cascaded),
+        "at_risk": list(impact.at_risk),
+        "unprotected": list(impact.unprotected),
+        "depth": impact.depth,
+        "subscribers_at_risk": int(subscribers),
+        "restoration_order": sim.world.asset_graph.restoration_order(impact.dark),
+        "summary": impact.describe(),
+    }
+
+
+@app.get("/api/route")
+async def resilient_route(from_lon: float, from_lat: float,
+                          to_lon: float, to_lat: float,
+                          surcharge_m: float | None = None):
+    """A crew route that avoids floodwater, as a GeoJSON Feature.
+
+    ``surcharge_m`` overrides the live water level for a what-if ("what would this
+    trip look like under another half metre"); omitted, it answers against whatever
+    the roads are actually carrying right now.
+    """
+    if engine.sim is None:
+        return JSONResponse({"error": "not ready"}, status_code=503)
+
+    network = engine.sim.network
+    if surcharge_m is None:
+        level = network.water_level
+    else:
+        level = network.surcharge_to_level(surcharge_m)
+
+    answer = network.get_resilient_route((from_lon, from_lat), (to_lon, to_lat), level)
+    return answer.to_geojson(network.frame)
 
 
 @app.get("/api/models")

@@ -62,6 +62,16 @@ CLEAR_SKY_SNR_DB = 30.0
 # slows traffic. 30 mm/hr is heavy tropical rain; KL's flash floods need roughly that
 # sustained over already-saturated ground.
 FLOOD_RAIN_MM_HR = 30.0
+
+# Metres of standing water per mm/hr of rain above the trigger. Converts a rain
+# intensity into a head of water the road graph can price; the conversion belongs here
+# because rain is the forcing and the water level is only its consequence.
+#
+# Ships at zero deliberately. A non-zero rise floods more roads under a heavy cell,
+# which changes dispatch decisions and moves the committed A/B figures in
+# data/results.json that tests/test_readme_claims.py holds the README to. Raise it to
+# turn on graded rain response -- and regenerate results.json in the same commit.
+FLOOD_RISE_PER_MM = 0.0
 FLOOD_SLOWDOWN = 3.2
 
 # Cell intensity falls to this fraction of peak at the nominal radius, which is what
@@ -259,33 +269,24 @@ class WeatherField:
         if not self.cells:
             return 0
 
-        midpoints = []
-        edges = list(network.graph.edges(data=True))
-        for a, b, _ in edges:
-            midpoints.append((network.node_xy[a] + network.node_xy[b]) / 2.0)
-        if not midpoints:
+        # The network may have been built before any terrain existed -- it is loaded
+        # from a GeoJSON path, and terrain is optional there. Attaching lazily keeps
+        # that constructor honest instead of demanding a DEM it might not have.
+        network.attach_terrain(terrain)
+        midpoints = network.edge_midpoints
+        if midpoints is None or not len(midpoints):
             return 0
 
-        points = np.array(midpoints)
-        rain = np.atleast_1d(self.rain_at(points[:, 0], points[:, 1], t))
-        low = np.atleast_1d(terrain.is_low_lying(points[:, 0], points[:, 1]))
-        flooded = (rain >= FLOOD_RAIN_MM_HR) & low
+        rain = np.atleast_1d(self.rain_at(midpoints[:, 0], midpoints[:, 1], t))
+        mask = rain >= FLOOD_RAIN_MM_HR
 
-        affected = 0
-        for (_, _, data), is_flooded in zip(edges, flooded):
-            standing = data.get("scenario_congestion", 1.0)
-            if is_flooded:
-                # Take the worse of the two rather than multiplying them. A jammed road
-                # that also floods is not 14x slower than free-flowing; traffic is
-                # already crawling and the water sets the floor.
-                factor = max(standing, FLOOD_SLOWDOWN)
-                data["congestion"] = factor
-                data["time"] = data["base_time"] * factor
-                data["flooded"] = True
-                affected += 1
-            elif data.get("flooded"):
-                # Waters recede: back to whatever standing congestion the scenario set.
-                data["flooded"] = False
-                data["congestion"] = standing
-                data["time"] = data["base_time"] * standing
-        return affected
+        # Rain is the forcing, the DEM is the response surface, and the water level is
+        # the state. Rain no longer touches edge attributes directly: it produces a
+        # level and a spatial mask, and the road graph decides what that costs. With
+        # FLOOD_RISE_PER_MM at zero the level is the low-lying threshold itself, which
+        # reduces to exactly the test this method used to apply -- "is the midpoint in
+        # the bottom decile of the DEM" -- and so reprices exactly the same edges.
+        peak = float(np.max(rain)) if len(rain) else 0.0
+        level = terrain.low_lying_threshold + FLOOD_RISE_PER_MM * max(
+            0.0, peak - FLOOD_RAIN_MM_HR)
+        return network.set_water_level(level, rain_mask=mask, graded=False)

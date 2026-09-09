@@ -29,8 +29,36 @@ const C = {
   crew:         [235, 242, 255],
   storm:        [96, 150, 220],
   flood:        [70, 190, 210],
+  floodDeep:    [116, 92, 232],
   cone:         [70, 140, 210],
+  linkPrimary:  [92, 158, 168],
+  linkProtect:  [104, 116, 148],
+  linkSevered:  [198, 72, 78],
 };
+
+/* Depth at which a service van stops being a vehicle -- mirrors IMPASSABLE_DEPTH_M in
+ * twinsync/routing.py. Kept in sync by eye, which is fine for a colour ramp: being a
+ * few centimetres out changes a shade, not a routing decision. */
+const IMPASSABLE_DEPTH_M = 0.5;
+
+/* Shallow water reads as the familiar cyan; water a van cannot cross shifts towards
+ * violet and thickens. The point is that "flooded" stops being one flat colour, so a
+ * judge can see at a glance which closures actually forced the detour. */
+/* Transport tier for a site, from the static payload. Falls back to 'edge' so a world
+ * served without an asset graph still renders rather than throwing per frame. */
+function assetTier(id) {
+  return world?.asset_graph?.tierById?.[id] || 'edge';
+}
+
+function floodColor(depth) {
+  const t = Math.max(0, Math.min(1, (depth || 0) / IMPASSABLE_DEPTH_M));
+  return [
+    Math.round(C.flood[0] + (C.floodDeep[0] - C.flood[0]) * t),
+    Math.round(C.flood[1] + (C.floodDeep[1] - C.flood[1]) * t),
+    Math.round(C.flood[2] + (C.floodDeep[2] - C.flood[2]) * t),
+    230,
+  ];
+}
 
 /* Crew position history, kept client-side so TripsLayer has something to draw. The
  * server pushes a position, not a track: storing the tail here costs nothing and turns
@@ -78,6 +106,7 @@ let logSeen = 0;
  * '3d'    — true line of sight against the extruded city
  * 'split' — both, side by side, off the same instant of the same simulation */
 let viewMode = '3d';
+let showLinks = true;        // transport dependency overlay (L)
 let dark2d = new Set();      // what a fair 2D coverage model concludes is dark
 let dark2dKey = '';
 
@@ -287,7 +316,14 @@ function paneLayers(mode) {
     getPosition: (f) => (flat
       ? f.geometry.coordinates
       : [...f.geometry.coordinates, f.properties.antenna_height]),
-    getRadius: (f) => (state?.tower_status?.[f.properties.id] === 'healthy' ? 5 : 9),
+    // Size carries the transport tier as well as health: a hub failing is a different
+    // event from an edge node failing, and the map should say so before the log does.
+    getRadius: (f) => {
+      const hurt = state?.tower_status?.[f.properties.id] !== 'healthy';
+      const tier = assetTier(f.properties.id);
+      const base = tier === 'hub' ? 8 : (tier === 'relay' ? 6 : 4.5);
+      return hurt ? base + 4 : base;
+    },
     getFillColor: (f) => STATUS_COLOR[state?.tower_status?.[f.properties.id] || 'healthy'],
     stroked: true,
     getLineColor: [5, 7, 13],
@@ -375,17 +411,49 @@ function paneLayers(mode) {
   // Flooded low-lying roads: DEM + rainfall + road graph, which is the fusion claim
   // this project exists to make. Drawn over the road layer so it reads as a highlight.
   const flooded = state?.weather?.flooded_paths || [];
+  const depths = state?.weather?.flood_depths || [];
   if (flooded.length) {
     layers.push(new PathLayer({
       id: p('flooded'),
       data: flooded,
       getPath: (segment) => segment,
-      getColor: [...C.flood, 230],
-      getWidth: 6,
+      // Depth arrives as a parallel array rather than an object per segment -- at a
+      // thousand-odd segments re-sent four times a second, key names cost more than
+      // the numbers do.
+      getColor: (segment, {index}) => floodColor(depths[index]),
+      getWidth: (segment, {index}) =>
+        ((depths[index] || 0) >= IMPASSABLE_DEPTH_M ? 9 : 6),
       widthMinPixels: 2.5,
       capRounded: true,
       parameters: {depthTest: false},
-      updateTriggers: {getPath: [state.t]},
+      updateTriggers: {getPath: [state.t], getColor: [state.t], getWidth: [state.t]},
+    }));
+  }
+
+  // -- transport dependency --------------------------------------------
+  //
+  // The hop each site depends on to reach a hub. Radio coverage is only half of why a
+  // site goes dark; this is the other half, and until now it was invisible.
+  const links = world?.asset_graph?.links || [];
+  if (links.length && showLinks) {
+    const severed = new Set(
+      (state?.cascade?.severed_links || []).map((pair) => pair.join('>')));
+    layers.push(new PathLayer({
+      id: p('asset-links'),
+      data: links,
+      getPath: (d) => d.path,
+      getColor: (d) => {
+        if (severed.has(`${d.from}>${d.to}`)) return [...C.linkSevered, 235];
+        return d.role === 'protect' ? [...C.linkProtect, 130] : [...C.linkPrimary, 190];
+      },
+      getWidth: (d) => (d.role === 'protect' ? 1.6 : 2.6),
+      widthMinPixels: 1,
+      getDashArray: (d) => (d.role === 'protect' ? [6, 4] : [0, 0]),
+      dashJustified: true,
+      extensions: [new PathStyleExtension({dash: true})],
+      parameters: {depthTest: false},
+      updateTriggers: {getColor: [state?.t]},
+      pickable: true,
     }));
   }
 
@@ -710,23 +778,65 @@ function renderKpis() {
   const weather = state.weather || {};
   const cells = weather.cells || [];
   const tile = $('kpi-weather-tile');
+  const surcharge = weather.water_surcharge_m;
+  const water = (surcharge === null || surcharge === undefined)
+    ? '' : ` · water +${surcharge.toFixed(2)} m`;
+
   if (cells.length) {
     const peak = Math.max(...cells.map((c) => c.rain_mm_hr));
     $('kpi-weather').textContent = `${peak.toFixed(0)} mm/hr`;
     $('kpi-weather-note').textContent = weather.flooded_segments
       ? `${cells.length} cell${cells.length > 1 ? 's' : ''} · ` +
-        `${weather.flooded_segments} roads flooded`
-      : `${cells.length} active cell${cells.length > 1 ? 's' : ''}`;
+        `${weather.flooded_segments} roads flooded${water}`
+      : `${cells.length} active cell${cells.length > 1 ? 's' : ''}${water}`;
+    tile.classList.add('warn');
+  } else if (weather.flooded_segments) {
+    // Operator-driven flooding with no storm overhead: still worth shouting about.
+    $('kpi-weather').textContent = `${weather.flooded_segments} flooded`;
+    $('kpi-weather-note').textContent = `standing water${water}`;
     tile.classList.add('warn');
   } else {
     $('kpi-weather').textContent = 'clear';
     $('kpi-weather-note').textContent = 'no active cells';
     tile.classList.remove('warn');
   }
+
   const busy = state.crews.filter((c) => c.status !== 'idle').length;
   $('kpi-open-note').textContent = busy
     ? `${busy} of ${state.crews.length} crews deployed`
     : 'crews idle';
+
+  renderCascade(state.cascade || {});
+}
+
+/* The cascade strip: what is running on battery, what goes dark next, and what is one
+ * more failure away from going dark. The last of those is the line a network operations
+ * centre actually acts on, and it fires on every single failure -- unlike a full
+ * cascade, which needs two hubs down before anything is isolated. */
+function renderCascade(cascade) {
+  const el = $('cascade-note');
+  if (!el) return;
+
+  const onBattery = cascade.on_battery || [];
+  const isolated = cascade.isolated || [];
+  const unprotected = cascade.unprotected || [];
+  const next = cascade.next_dark;
+  const parts = [];
+
+  if (isolated.length) parts.push(`${isolated.length} isolated (${isolated.join(', ')})`);
+  if (onBattery.length) {
+    parts.push(`${onBattery.length} on battery`);
+    if (next) {
+      const minutes = next.in_s / 60;
+      parts.push(minutes >= 1
+        ? `${next.tower} dark in ${minutes.toFixed(0)} min`
+        : `${next.tower} dark in ${next.in_s.toFixed(0)} s`);
+    }
+  }
+  if (unprotected.length) parts.push(`${unprotected.length} single-fed`);
+
+  el.textContent = parts.length ? parts.join(' · ') : 'transport nominal · all sites dual-fed';
+  el.classList.toggle('bad', isolated.length > 0 || onBattery.length > 0);
 }
 
 function renderIncidents() {
@@ -900,6 +1010,13 @@ async function boot() {
   world = await (await fetch('/api/world')).json();
   world.roads = await (await fetch('/api/roads')).json();
 
+  // Index the transport tiers once. The topology is static, so this is the only place
+  // it needs looking up -- doing it per frame per tower would be 60 lookups at 4 Hz.
+  if (world.asset_graph) {
+    world.asset_graph.tierById = Object.fromEntries(
+      (world.asset_graph.nodes || []).map((n) => [n.id, n.tier]));
+  }
+
   $('aoi').textContent =
     `Kuala Lumpur CBD · ${fmt(world.buildings.features.length)} buildings · ` +
     `${world.towers.features.length} sites · ${fmt(world.total_subscribers)} subscribers`;
@@ -919,6 +1036,17 @@ async function boot() {
     const p = f.properties;
     return `<option value="${p.id}">${p.id} — ${p.name || 'site'}</option>`;
   }).join('');
+
+  // The blackout picker names each site's tier, because which one you cut decides
+  // whether anything cascades: an edge node takes nothing with it, a hub takes a
+  // district. Relays first, since that is the interesting middle case.
+  const blackout = $('blackout-tower');
+  if (blackout) {
+    blackout.innerHTML = world.towers.features.map((f) => {
+      const id = f.properties.id;
+      return `<option value="${id}">${id} — ${assetTier(id)}</option>`;
+    }).join('');
+  }
 
   // Terrain is optional: a repo without a baked DEM should still boot, just flat.
   try {
@@ -1054,6 +1182,45 @@ $('btn-storm').addEventListener('click', async () => {
   }
 });
 
+/* Flooding on demand. The storm route is realistic but slow -- a cell has to drift in
+ * before anything gets wet -- and a demo does not have four minutes to spare. */
+async function applyFlood(surcharge) {
+  $('flood-label').textContent = `+${surcharge.toFixed(1)} m`;
+  try {
+    const r = await fetch(`/api/flood?surcharge_m=${surcharge}&graded=true`,
+                          {method: 'POST'});
+    const body = await r.json();
+    if (!r.ok) {
+      flashStatus(body.error || 'flood failed', false);
+      return;
+    }
+    flashStatus(`water +${surcharge.toFixed(1)} m — ` +
+                `${body.flooded_segments} road segments under water`, true);
+  } catch (err) {
+    flashStatus('flood failed', false);
+  }
+}
+
+$('flood').addEventListener('input', (e) => {
+  $('flood-label').textContent = `+${(e.target.value / 10).toFixed(1)} m`;
+});
+$('flood').addEventListener('change', (e) => applyFlood(e.target.value / 10));
+
+$('btn-blackout').addEventListener('click', async () => {
+  const tower = $('blackout-tower').value;
+  if (!tower) return;
+  try {
+    // Eight minutes of autonomy rather than the honest hours: the countdown has to
+    // finish inside a demo for the cascade behind it to be visible at all.
+    const r = await fetch(`/api/blackout/${tower}?minutes=8`, {method: 'POST'});
+    const body = await r.json();
+    flashStatus(body.ok ? `${tower} on battery — 8 min to blackout`
+                        : (body.error || 'failed'), !!body.ok);
+  } catch (err) {
+    flashStatus('power cut failed', false);
+  }
+});
+
 $('btn-fault').addEventListener('click', async () => {
   const tower = $('fault-tower').value;
   const profile = $('fault-profile').value;
@@ -1181,7 +1348,16 @@ window.addEventListener('keydown', (e) => {
   // button. Lowercase only, to leave shifted keys free.
   else if (e.key === 's') $('btn-storm').click();
   else if (e.key === 'f') $('btn-fault').click();
+  else if (e.key === 'b') $('btn-blackout').click();
   else if (e.key === 'd') $('btn-demo').click();
+  else if (e.key === 'l') { showLinks = !showLinks; render(); }
+  else if (e.key === 'w') {
+    // Step the water up in half metres and wrap, so one key drives the whole ladder.
+    const slider = $('flood');
+    const next = (Number(slider.value) + 5) % 35;
+    slider.value = String(next > 30 ? 0 : next);
+    applyFlood(Number(slider.value) / 10);
+  }
   else if (e.key === 'Escape' && demoOn) stopDemo();
 });
 

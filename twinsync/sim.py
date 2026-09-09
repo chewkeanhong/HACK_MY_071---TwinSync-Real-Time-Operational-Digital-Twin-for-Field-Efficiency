@@ -25,11 +25,15 @@ from .coverage import CoverageEngine
 from .dispatch import Crew, DispatchEngine
 from .metrics import CO2_KG_PER_L, FUEL_L_PER_KM, Comparison, RunMetrics, collect
 from .priority import assess
-from .routing import RoadNetwork
+from .routing import DRY, RoadNetwork
 from .weather import WeatherField
-from .world import World
+from .world import BATTERY_AUTONOMY_S, TIER_EDGE, World
 
 COVERAGE_CACHE = "coverage_cache.json"
+
+# How often the cascade is re-evaluated. Battery autonomy is measured in hours, so a
+# per-tick recompute would burn cycles to watch a clock that barely moves.
+CASCADE_CHECK_PERIOD_S = 30.0
 
 # How often the flood scan re-walks the road graph. A storm cell moves a few metres a
 # second; which segments are underwater does not change at the telemetry sample rate.
@@ -101,6 +105,17 @@ class Simulation:
         self.backhaul_peer = self._build_backhaul_peers()
         self.flooded_segments = 0
         self._last_flood_check = -1e9
+        # Water set by hand rather than by the weather. None means "the rain decides".
+        self.operator_water_level: float | None = None
+
+        # Battery state. It lives here rather than on the towers because one World is
+        # shared by both arms of the A/B run, so a clock ticking on a Tower would leak
+        # between them. `battery_started_at` is the only mutable part; everything else
+        # is derived from it and the simulation clock, which keeps it deterministic.
+        self.battery_autonomy_s = self._build_battery_autonomy()
+        self.battery_started_at: dict[str, float] = {}
+        self.cascade = self.world.calculate_cascade_impact(())
+        self._last_cascade_check = -1e9
 
         self._incident_by_tower: dict[str, str] = {}
         self._apply_congestion()
@@ -123,8 +138,61 @@ class Simulation:
             risk[tower.id] = min(1.0, max(0.0, value))
         return risk
 
+    def _build_battery_autonomy(self) -> dict[str, float]:
+        """Seconds of DC autonomy per site, by tier unless the scenario overrides it.
+
+        Same shape as :meth:`_build_encroachment_risk`: the derived value is the
+        default and a scenario may state a different one, which is how "suppose this
+        site's plant were only good for ten minutes" is expressed without editing the
+        topology.
+        """
+        configured = self.scenario.get("battery_minutes") or {}
+        autonomy: dict[str, float] = {}
+        for tower in self.world.towers:
+            if tower.id in configured:
+                autonomy[tower.id] = float(configured[tower.id]) * 60.0
+            else:
+                autonomy[tower.id] = self.world.asset_graph.battery_s.get(
+                    tower.id, BATTERY_AUTONOMY_S[TIER_EDGE])
+        return autonomy
+
+    def battery_remaining_s(self) -> dict[str, float]:
+        """Seconds of battery left at each site currently running on it."""
+        return {
+            tower_id: max(0.0, self.battery_autonomy_s.get(tower_id, 0.0)
+                          - (self.t - started))
+            for tower_id, started in self.battery_started_at.items()
+        }
+
+    def put_on_battery(self, tower_id: str, *, minutes: float | None = None) -> float:
+        """Cut mains to a site and start its countdown. Returns the autonomy in seconds.
+
+        The mains-loss half of a power failure, split out from the radio fault so the
+        dashboard can trigger it on its own. Idempotent: a site already on battery
+        keeps its original start time rather than silently topping itself up.
+        """
+        if tower_id not in self.battery_autonomy_s:
+            raise KeyError(tower_id)
+        if minutes is not None:
+            self.battery_autonomy_s[tower_id] = float(minutes) * 60.0
+        if tower_id not in self.battery_started_at:
+            self.battery_started_at[tower_id] = self.t
+            autonomy = self.battery_autonomy_s[tower_id]
+            self._log(f"POWER {tower_id} lost mains -- on battery, "
+                      f"{autonomy / 60.0:.0f} min of autonomy")
+            self._last_cascade_check = -1e9
+        return self.battery_autonomy_s[tower_id]
+
     def _build_backhaul_peers(self) -> dict[str, str]:
-        """Nearest-neighbour backhaul topology, one hop per site."""
+        """Nearest-neighbour backhaul topology, one hop per site.
+
+        Deliberately *not* the same structure as
+        :attr:`twinsync.world.World.asset_graph`, and the difference is not an
+        oversight. This is an RF question -- which hop does rain fade degrade -- and
+        the nearest neighbour is the right answer for it. The asset graph is a
+        transport dependency question: whose failure takes me with it. They model
+        different layers and disagree for three of the fifteen sites.
+        """
         peers: dict[str, str] = {}
         for tower in self.world.towers:
             others = [t for t in self.world.towers if t.id != tower.id]
@@ -176,6 +244,10 @@ class Simulation:
                 start_s=float(spec["start_s"]),
             )
             self._log(f"fault injected at {spec['tower']} ({spec['profile']})")
+            if spec["profile"] == "power_failure":
+                # A power failure is a mains failure: the site keeps running on its
+                # battery plant, and the clock that matters starts now.
+                self.put_on_battery(spec["tower"])
 
     def _log(self, message: str) -> None:
         # The index lets a client append only what it has not already shown. Without it
@@ -246,6 +318,13 @@ class Simulation:
             return
         self._last_flood_check = self.t
 
+        if self.operator_water_level is not None and not self.weather.active_cells(self.t):
+            # Someone set the water by hand and nothing is raining on it. Leave their
+            # level alone: draining the city from under an operator sixty seconds after
+            # they flooded it is not a scan, it is a bug. A live cell still takes over
+            # below, which is the right precedence -- real weather beats a slider.
+            return
+
         previous = self.flooded_segments
         self.flooded_segments = self.weather.flooded_segments(
             self.network, self.world.terrain, self.t)
@@ -255,10 +334,70 @@ class Simulation:
         elif previous and not self.flooded_segments:
             self._log("WEATHER floodwater receded, roads back to normal")
 
+    def _cascade_payload(self) -> dict:
+        """Live transport state for the dashboard. Topology itself is served statically."""
+        impact = self.cascade
+        remaining = self.battery_remaining_s()
+        soonest = impact.at_risk[0] if impact.at_risk else None
+        return {
+            "isolated": [t for t in impact.dark if t not in self.failed_towers],
+            "at_risk": list(impact.at_risk),
+            "unprotected": list(impact.unprotected),
+            "on_battery": sorted(self.battery_started_at),
+            "battery_s": {k: round(v, 1) for k, v in sorted(remaining.items())},
+            "time_to_dark_s": {
+                k: (None if v == float("inf") else round(v, 1))
+                for k, v in sorted(impact.time_to_dark_s.items())
+            },
+            "next_dark": (None if soonest is None else
+                          {"tower": soonest,
+                           "in_s": round(impact.time_to_dark_s[soonest], 1)}),
+            "severed_links": [list(pair) for pair in impact.severed_links],
+        }
+
+    def _update_cascade(self) -> None:
+        """Re-evaluate the transport cascade and run the battery clocks down.
+
+        Observational almost all of the time: it asks the asset graph what the current
+        failure set implies and stores the answer for the dashboard. The one thing it
+        *does* change is a site whose battery has run out, which is a genuine failure
+        and is reported through the same path as any other -- so it raises an incident,
+        gets a risk score and gets a crew, rather than quietly turning a dot red.
+
+        Nothing here fires in the committed scenario: the shortest autonomy in it is an
+        hour and the run is an hour, so a blackout has to be triggered deliberately.
+        That is what keeps the A/B figures this repo publishes unmoved.
+        """
+        if self.t - self._last_cascade_check < CASCADE_CHECK_PERIOD_S:
+            return
+        self._last_cascade_check = self.t
+
+        remaining = self.battery_remaining_s()
+        drained = sorted(site for site, left in remaining.items()
+                         if left <= 0.0 and site not in self.failed_towers)
+        for tower_id in drained:
+            self._log(f"BATTERY {tower_id} exhausted after "
+                      f"{self.battery_autonomy_s[tower_id] / 60.0:.0f} min -- site dark")
+            self._on_state_change(tower_id, "down", ["battery exhausted"])
+
+        previous = set(self.cascade.dark)
+        self.cascade = self.world.calculate_cascade_impact(
+            (),
+            already_failed=self.failed_towers,
+            on_battery=self.battery_started_at.keys(),
+            battery_remaining_s=remaining,
+        )
+        isolated = set(self.cascade.dark) - self.failed_towers
+        newly = sorted(isolated - previous)
+        if newly:
+            self._log(f"CASCADE {', '.join(newly)} isolated -- no surviving path to a "
+                      f"hub after {', '.join(sorted(self.failed_towers))} went down")
+
     def step(self, dt: float) -> None:
         self.t += dt
         self._release_faults()
         self._update_flooding()
+        self._update_cascade()
 
         emit_digest = (self.t - self._last_digest_at) >= self.digest_period_s
         if emit_digest:
@@ -418,6 +557,7 @@ class Simulation:
             })
 
         flooded = []
+        flood_depths = []
         if self.flooded_segments:
             seen = set()
             for a, b, data in self.network.graph.edges(data=True):
@@ -433,6 +573,10 @@ class Simulation:
                 lon1, lat1 = frame.to_lonlat(bx, by)
                 flooded.append([[round(float(lon0), 7), round(float(lat0), 7)],
                                 [round(float(lon1), 7), round(float(lat1), 7)]])
+                # Parallel array rather than an object per segment: at a thousand-odd
+                # segments re-sent several times a second, the key names would cost
+                # more bytes than the numbers.
+                flood_depths.append(round(float(data.get("water_depth_m", 0.0)), 2))
 
         return {
             "t": round(self.t, 1),
@@ -442,8 +586,17 @@ class Simulation:
                 "cells": cells,
                 "flooded_segments": self.flooded_segments,
                 "flooded_paths": flooded,
+                "flood_depths": flood_depths,
+                "water_level": (None if self.network.water_level == DRY
+                                else round(self.network.water_level, 2)),
+                "water_surcharge_m": (
+                    None if self.network.water_level == DRY
+                    else round(self.network.water_level - self.network.flood_datum, 2)),
+                "flood_datum": round(self.network.flood_datum, 2),
+                "flood_source": self.network.flood_source,
                 "profile": self.weather.profile,
             },
+            "cascade": self._cascade_payload(),
             "dark_buildings": sorted(self.state.dark_buildings),
             # What a fair 2D model concludes is dark, and the raw circle it would draw.
             "dark_buildings_2d": sorted(self.coverage.outage_2d(self.failed_towers)),
@@ -512,7 +665,8 @@ def load_all(data_dir: Path, *, verbose: bool = True) -> tuple[World, CoverageEn
         coverage.compute(verbose=verbose)
         coverage.save(cache)
 
-    network = RoadNetwork.load(data_dir / "roads.geojson", world.frame)
+    network = RoadNetwork.load(data_dir / "roads.geojson", world.frame,
+                               terrain=world.terrain)
     if verbose:
         print(f"network: {network.summary()}")
     return world, coverage, network
@@ -544,7 +698,8 @@ def main(argv=None) -> int:
         arm = "TwinSync" if smart else "today"
         print(f"\n{'=' * 64}\n{arm}\n{'=' * 64}")
         # A fresh network per arm so congestion state cannot leak between them.
-        arm_network = RoadNetwork.load(args.data / "roads.geojson", world.frame)
+        arm_network = RoadNetwork.load(args.data / "roads.geojson", world.frame,
+                                       terrain=world.terrain)
         sim = Simulation(world, coverage, arm_network, scenario,
                          smart=smart, seed=args.seed)
         results[smart] = sim.run(duration)
