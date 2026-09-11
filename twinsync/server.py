@@ -430,6 +430,12 @@ async def get_metrics(sites: int | None = None,
             "km_saved": saved.get("km_saved"),
             "mttr_improvement_pct": saved.get("mttr_improvement_pct"),
             "mttd_improvement_pct": saved.get("mttd_improvement_pct"),
+            # Both sides of the detection clock, not just the delta. The MTTD tile
+            # renders "10.0 min -> 2.4 s", and a percentage alone cannot say that.
+            "mttd_baseline_minutes": saved.get("baseline", {}).get(
+                "mean_detection_minutes"),
+            "mttd_twinsync_minutes": saved.get("twinsync", {}).get(
+                "mean_detection_minutes"),
             "per_incident": {k: round(v, 3) for k, v in unit.items()},
             "annualised": project_annual(
                 unit,

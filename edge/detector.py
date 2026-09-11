@@ -210,6 +210,46 @@ class EdgeDetector:
         self._forest_threshold = -0.55   # replaced by calibration at end of warmup
         self.confirm_evaluations = 0
 
+        # True only while re-warming after a repair (see relearn). The initial warmup
+        # trusts nothing, but a site that has already been in service and was just
+        # fixed should still honour the hard limits while it re-learns.
+        self._rewarming = False
+        # Set by relearn(): take the next sample as the new mean, keeping the variance.
+        self._reseed = False
+
+    def relearn(self) -> None:
+        """Re-seed the baseline mean from the next sample, after a repair.
+
+        The baseline is deliberately not updated during a fault (see
+        :meth:`_update_baseline`), so it is frozen at whatever the site looked like when
+        the fault was detected -- including any *environmental* offset in force at that
+        moment. That is the part that bites: a site whose fault spans a passing storm
+        holds a mean learned in 95 mm/hr rain, and when the crew repairs it in dry air
+        the perfectly healthy telemetry sits several sigma from that stale mean. The site
+        alarms the instant it is fixed, raises a duplicate incident, and sends a second
+        van to a tower that is already working.
+
+        Only the **mean** is re-seeded. The variance describes sensor noise, which a
+        repair does not change, and it is slow to relearn -- ``EWMA_ALPHA`` is 0.002, so
+        resetting it to unity leaves the z-scores inflated for hundreds of samples and
+        manufactures exactly the false alarm this method exists to prevent (throughput,
+        whose variance converges to ~160, alarms about five samples after the re-warm
+        window closes).
+
+        Alarms stay suppressed for ``warmup`` samples while the mean settles -- 16 s at
+        the scenario's 5 Hz. The hard limits keep working throughout, so a site that is
+        repaired and then dies outright is still caught immediately.
+        """
+        self.state = "healthy"
+        self.samples_seen = 0
+        self._reseed = True
+        self._window.clear()
+        self._streak = 0
+        self._pending = None
+        self._confirm_score = 0.0
+        self._confirm_flag = False
+        self._rewarming = True
+
     @property
     def engine(self) -> str:
         return "onnx" if self.model is not None else "forest"
@@ -227,10 +267,14 @@ class EdgeDetector:
         Learning during a fault would let the detector quietly accept the fault as
         normal -- the classic way an adaptive threshold goes blind.
         """
-        if not self._initialised:
+        if not self._initialised or self._reseed:
             self._mean = values.copy()
-            self._var = np.ones_like(values)
+            # A re-seed after a repair keeps the variance it has already learned; only
+            # a detector that has never seen traffic starts from unity. See relearn().
+            if not self._initialised:
+                self._var = np.ones_like(values)
             self._initialised = True
+            self._reseed = False
             return
         delta = values - self._mean
         self._mean += EWMA_ALPHA * delta
@@ -306,6 +350,15 @@ class EdgeDetector:
                     float(np.percentile(training_scores, FOREST_PERCENTILE))
                     - FOREST_MARGIN
                 )
+            if hard_down and self._rewarming:
+                # Repaired, then genuinely dead. The hard limits are absolute and owe
+                # nothing to the baseline, so they are the one thing worth acting on
+                # before the re-warm has finished.
+                changed, self.state = self.state != "down", "down"
+                return Verdict("down", changed, reasons, max_z, distance,
+                               confirm_score, self.engine)
+            if self.samples_seen >= self.warmup:
+                self._rewarming = False
             return Verdict(self.state, False, [], max_z, distance, confirm_score,
                            self.engine)
 

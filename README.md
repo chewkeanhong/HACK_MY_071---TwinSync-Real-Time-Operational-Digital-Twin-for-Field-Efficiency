@@ -19,8 +19,12 @@ Three numbers, all measured by code in this repository:
 | | |
 |---|---|
 | **9,023 people** | that a flat coverage map says are fine, and who are actually off the air |
-| **10 min → 2.4 s** | time to detect, because inference runs on the tower instead of waiting for a complaint |
-| **RM 1.12M / year** | avoided across a 2,000-site network — projected from a controlled A/B run, assumptions on screen and clickable |
+| **10 min → under a second** | time to detect, because inference runs on the tower instead of waiting for a complaint |
+| **19.8M subscriber-hours / year** | of service restored across a 2,000-site network — projected from a controlled A/B run, assumptions on screen and clickable |
+
+The third number is service restored, not money saved, and that is deliberate: on this
+scenario TwinSync drives **further** than the baseline and burns more fuel doing it. The
+[results section](#measured-results) is where that trade is set out rather than buried.
 
 ---
 
@@ -99,27 +103,44 @@ edge inference). It is a controlled experiment, not a marketing claim.
 
 | metric | today | TwinSync |
 |---|---|---|
-| MTTD — detect | 10.0 min | **0.04 min** (2.4 s) |
-| MTTL — localise | n/a | **0.04 min** |
-| MTTR — restore (mean) | 40.3 min | **35.7 min** (−11 %) |
-| MTTR — p90 | 41.6 min | 44.7 min |
-| truck rolls | 4 | **3** |
-| distance driven | 9.3 km | **6.8 km** |
-| CO₂ | 2.7 kg | **2.0 kg** |
-| crew utilisation | 50.7 % | 50.5 % |
-| subscriber-minutes lost | 444,581 | **401,026** |
-| SLA uptime | 98.866 % | **98.977 %** |
-| cost of truck rolls | RM 1,680 | **RM 1,260** |
-| edge uplink | 61.8 MiB raw | **942 KiB (−98.5 %)** |
+| MTTD — detect | 10.0 min | **0.01 min** (0.7 s) |
+| MTTL — localise | n/a | **0.01 min** |
+| MTTR — restore (mean) | 40.3 min | **28.9 min** (−28 %) |
+| MTTR — p90 | 41.6 min | **29.3 min** |
+| truck rolls | 6 | **6** |
+| distance driven | 12.4 km | 16.2 km |
+| CO₂ | 3.7 kg | 4.8 kg |
+| crew utilisation | 62.7 % | **77.2 %** |
+| subscriber-minutes lost | 3,151,022 | **2,706,039** |
+| SLA uptime | 91.960 % | **93.095 %** |
+| cost of truck rolls | RM 2,520 | **RM 2,520** |
+| edge uplink | 61.8 MiB raw | **943 KiB (−98.5 %)** |
+
+Two rows go the wrong way and are left that way on purpose.
+
+**Truck rolls tie, and fuel gets worse.** Batching saves one roll — KL-13 folded into the
+trip already running to KL-03 — and preemption spends exactly that roll back: when KL-04
+fails with 42,053 subscribers and two pieces of critical infrastructure behind it, the
+dispatcher pulls a van off KL-03 mid-route, and KL-03 then needs its own trip later. The
+3.8 extra km is that U-turn. That is the actual trade the queue makes: **one van-trip and
+3.8 km to restore a 53,399-subscriber site sooner.** An operator may well take that deal,
+but it is a trade and not a saving, and reporting it as a saving would be a lie the fuel
+figures would catch.
+
+**MTTD is measured over resolved incidents only**, which is why it reads 0.7 s rather
+than the 2.8 s the log shows for KL-03: MTTD, MTTL and MTTR are a matched set describing
+incidents that ran their full course. The live dashboard tile averages *every* fault it
+has seen, so it agrees with the log lines beside it. Per fault, the edge detected in
+0.6 s, 0.6 s, 0.8 s, 1.2 s, 2.8 s and 5.8 s.
 
 ### What that is worth at network scale
 
-One hour, three faults, fifteen sites is a demo. The projection onto an operator's
-network is arithmetic on top of it, and every step is stated because every step is
-arguable:
+One hour, six faults, fifteen sites and four vans is a demo. The projection onto an
+operator's network is arithmetic on top of it, and every step is stated because every
+step is arguable:
 
 ```
-measured per incident:  0.33 truck rolls · RM 140 · 0.83 km · 14,518 subscriber-minutes
+measured per incident:  0.00 truck rolls · RM 0 · -1.28 km · 148,328 subscriber-minutes
         × 2,000 sites  (assumption)
         × 4 faults/site/year  (assumption)
         = 8,000 incidents/year
@@ -127,30 +148,45 @@ measured per incident:  0.33 truck rolls · RM 140 · 0.83 km · 14,518 subscrib
 
 | | per year |
 |---|---|
-| truck rolls avoided | **2,667** |
-| cost avoided | **RM 1,120,000** |
-| distance not driven | 6,629 km |
-| CO₂ | 1.95 t |
-| subscriber-hours restored | 1,935,784 |
+| truck rolls avoided | **0** |
+| cost avoided | **RM 0** |
+| distance not driven | -10,212 km |
+| CO₂ | -3.01 t |
+| subscriber-hours restored | 19,777,034 |
+
+The bottom row is the claim. The top four are zero or negative and stay in the table
+because deleting them would make the projection dishonest: on this scenario TwinSync buys
+service restoration with fuel, and the arithmetic says so in both directions. An earlier
+version of this table reported RM 1.12M avoided per year, from a fleet that never
+saturated — four vans against four concurrent jobs, so the dispatcher never had to
+preempt, and the truck-roll saving was real but the preemption the pitch described had
+never once executed. The fault list is one longer than the fleet now, `reassignments` in
+`data/results.json` reads 1 instead of 0, and making the preemption real cost the fuel
+saving. That is the honest exchange rate.
 
 **The two multipliers are the weakest part of this number, so the dashboard lets you
 change them.** Click the "annualised saving" tile and it cycles 2,000 → 5,000 → 10,000 →
 500 sites live; `GET /api/metrics?sites=5000&incidents_per_site=6` does the same over
 HTTP. The per-incident savings underneath are measured; only the scaling is assumed.
 
-**The 11 % MTTR gain is honest and modest**, because on-site repair time dominates and is
-identical in both arms. The large wins are detection (10 min → 2.4 s) and backhaul
+**The 28 % MTTR gain is mostly detection, not repair**, because on-site repair time
+dominates and is identical in both arms — the ten minutes the baseline spends waiting
+for a customer to call is time the crew is not driving. The other large win is backhaul
 (−98.5 %).
 
-**And the p90 is worse, deliberately shown.** Batching a second job onto an in-flight trip
-is what removes the truck roll, and it also makes that second job wait. The mean improves,
-the tail does not. Reporting only the mean would hide a real trade-off an operator would
-want to know about before adopting this.
+**Batching still makes the second job wait.** Folding KL-13 into the trip already running
+to KL-03 is what removes a truck roll, and it delays KL-13 to do it. On this run the p90
+improves anyway — 41.6 min to 29.3 min — because the baseline's ten-minute detection
+delay costs it more than batching costs us. That has not always been true: on an earlier
+five-fault scenario the mean improved while the p90 got worse, and it is reported either
+way, because the mean alone would hide a trade-off an operator would want to know about
+before adopting this.
 
 ### The headline 3D number
 
-With the scenario's four towers down, a fair 2D coverage model — inside a failed circle,
-outside every healthy one — reports **3 buildings dark, 3 subscribers**. True 3D
+With the scenario's first four towers down — KL-03, KL-13, KL-09, KL-06, the state the
+run holds between t=1150 s and t=1250 s — a fair 2D coverage model (inside a failed
+circle, outside every healthy one) reports **3 buildings dark, 3 subscribers**. True 3D
 line-of-sight over terrain, with Fresnel clearance, says **47 buildings, 9,026
 subscribers**.
 
@@ -297,7 +333,9 @@ training window and can only corroborate, never trip the alarm alone.
 chosen by sweeping both failure modes (see the table in `edge/detector.py`).
 
 **Two of four crews could reach nothing.** Depots had snapped onto road stubs clipped by
-the AOI boundary. Snapping is now restricted to the largest *strongly* connected component.
+the AOI boundary. Snapping is now restricted to the largest *strongly* connected
+component. (The scenario still runs four vans; what changed is that the fault list is
+now six long, so the fleet can actually be saturated and preemption is reachable.)
 
 **INT8 quantisation was tried and rejected.** At ~700 parameters INT8 is *larger* than
 FP32 (4.8 KB vs 3.0 KB — the Quantize/Dequantize nodes cost more than the weights they

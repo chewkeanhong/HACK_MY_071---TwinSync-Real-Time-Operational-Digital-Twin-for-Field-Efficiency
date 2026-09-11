@@ -269,9 +269,10 @@ def run():
             errors.append(f"websocket not connected: {hud['conn']}")
 
         # -- KPI row must stay on one line -------------------------------
-        # Adding a seventh tile is exactly how the original bug happened: the row wraps,
-        # grows past the chaos panel's 148px, and swallows every click underneath it.
-        # Assert the geometry rather than trusting that it looked fine once.
+        # Adding a tile is exactly how the original bug happened: the row wraps, grows
+        # past the chaos panel's 148px, and swallows every click underneath it. It is at
+        # eight tiles now (MTTD was the eighth), so this has real headroom left to spend
+        # but not much. Assert the geometry rather than trusting that it looked fine once.
         kpi = page.evaluate("""() => {
             const row = document.querySelector('.kpis');
             const tiles = [...document.querySelectorAll('.kpi')];
@@ -284,6 +285,8 @@ def run():
                 lines: tops.size,
                 roi: document.getElementById('kpi-roi')?.textContent,
                 roiNote: document.getElementById('kpi-roi-note')?.textContent,
+                mttd: document.getElementById('kpi-mttd')?.textContent,
+                mttdNote: document.getElementById('kpi-mttd-note')?.textContent,
             };
         }""")
         print("kpi row:", kpi)
@@ -297,6 +300,15 @@ def run():
                           f"chaos panel (top {chaos_top:.0f}px)")
         if not kpi["roi"] or kpi["roi"].strip() in ("", "—", "-"):
             errors.append("ROI tile never populated from /api/metrics")
+        # The MTTD tile is the one number the whole edge-AI argument rests on, and it is
+        # fed by a different path to every other tile (the A/B artifact, then the live
+        # run's own detection block). Silence here means the demo quietly loses it.
+        if not kpi["mttd"] or kpi["mttd"].strip() in ("", "—", "-"):
+            errors.append("MTTD tile never populated -- check data/results.json exists "
+                          "and /api/metrics returns ab.mttd_baseline_minutes")
+        elif "→" not in (kpi["mttdNote"] or ""):
+            errors.append(f"MTTD tile shows {kpi['mttd']!r} but its note is "
+                          f"{kpi['mttdNote']!r} -- the baseline comparison is missing")
 
         # And the assumptions behind it must be substitutable on the spot.
         page.click("#kpi-roi-tile")

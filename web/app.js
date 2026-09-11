@@ -701,16 +701,70 @@ function riskFactorsHtml(towerId) {
 const ROI_FLEETS = [2000, 5000, 10000, 500];
 let roiFleet = 0;
 let roi = null;
+let mttdAb = null;
 
 async function loadRoi() {
   const sites = ROI_FLEETS[roiFleet];
   try {
     const body = await (await fetch(`/api/metrics?sites=${sites}`)).json();
     roi = body.ab?.annualised || null;
+    // One fetch, two tiles. The MTTD baseline is a property of the committed A/B run,
+    // not of the fleet-size assumption, so re-reading it on each ROI click is free.
+    mttdAb = body.ab ? {
+      baselineMin: body.ab.mttd_baseline_minutes,
+      twinsyncMin: body.ab.mttd_twinsync_minutes,
+      improvementPct: body.ab.mttd_improvement_pct,
+    } : null;
   } catch (err) {
     roi = null;
+    mttdAb = null;
   }
   renderRoi();
+  renderMttd();
+}
+
+/* MTTD -- fault onset to the operator knowing.
+ *
+ * The single clearest number in the project, and it used to live only in the scrolling
+ * log. Two sources, deliberately in this order: once the live run has detected anything
+ * the tile shows *that* run's mean, so it can never contradict the "after 2.8s" line in
+ * the log beside it; before then it falls back to the committed A/B mean. The note
+ * carries the baseline either way, because "2.4 s" means nothing without the 10 minutes
+ * it replaced. */
+function detectionText(seconds) {
+  if (seconds === null || seconds === undefined) return '—';
+  if (seconds < 60) return `${seconds < 10 ? seconds.toFixed(1) : Math.round(seconds)} s`;
+  return `${(seconds / 60).toFixed(1)} min`;
+}
+
+function renderMttd() {
+  const tile = $('kpi-mttd-tile');
+  const live = state?.detection;
+  const haveLive = live && live.count > 0 && live.mean_s !== null;
+  const seconds = haveLive
+    ? live.mean_s
+    : (mttdAb?.twinsyncMin != null ? mttdAb.twinsyncMin * 60 : null);
+
+  $('kpi-mttd').textContent = detectionText(seconds);
+  tile.classList.toggle('mttd', seconds !== null);
+
+  if (seconds === null) {
+    $('kpi-mttd-note').textContent = mttdAb ? 'no faults detected yet'
+                                            : 'waiting for the A/B result';
+    return;
+  }
+  const baseline = mttdAb?.baselineMin;
+  if (baseline == null) {
+    $('kpi-mttd-note').textContent = haveLive
+      ? `${live.count} fault(s) this run` : 'from the committed A/B run';
+    return;
+  }
+  // Recomputed against the live mean rather than reusing the A/B percentage, which
+  // describes a different set of faults. Kept terse: this note has to stay on one line
+  // inside a 140px tile (see the MTTD rules in style.css).
+  const pct = 100 * (1 - seconds / (baseline * 60));
+  $('kpi-mttd-note').textContent =
+    `${baseline.toFixed(1)} min → ${detectionText(seconds)} · −${pct.toFixed(1)}%`;
 }
 
 function renderRoi() {
@@ -720,12 +774,19 @@ function renderRoi() {
     $('kpi-roi-note').textContent = 'no A/B result baked';
     return;
   }
-  const myr = roi.cost_saved_myr;
-  $('kpi-roi').textContent = myr >= 1e6
-    ? `RM ${(myr / 1e6).toFixed(2)}M`
-    : `RM ${fmt(Math.round(myr / 1000))}k`;
+  // Subscriber-hours, not ringgit. On this scenario the truck-roll saving is exactly
+  // zero -- batching removes one roll and preempting for KL-04 spends it straight back
+  // -- so a money tile would read "RM 0" at every fleet size and the click would prove
+  // nothing. Restored service is where the measured win actually is, and it scales with
+  // the same two assumptions, so the tile still does its real job: letting someone
+  // disagree with 2,000 sites and watch the number move.
+  const hours = roi.subscriber_hours_saved;
+  $('kpi-roi').textContent = hours >= 1e6
+    ? `${(hours / 1e6).toFixed(1)}M h`
+    : `${fmt(Math.round(hours / 1000))}k h`;
   $('kpi-roi-note').textContent =
-    `${fmt(roi.assumed_sites)} sites · ${fmt(roi.truck_rolls_avoided)} rolls avoided`;
+    `${fmt(roi.assumed_sites)} sites × ` +
+    `${roi.assumed_incidents_per_site_per_year} faults/yr`;
   tile.classList.add('roi');
 }
 
@@ -763,6 +824,8 @@ function renderKpis() {
     $('kpi-uplink-note').textContent =
       `${bytesText(up.sent_bytes)} sent vs ${bytesText(up.raw_bytes)} raw`;
   }
+
+  renderMttd();
 
   $('kpi-open').textContent = state.incidents.length;
   $('kpi-open').parentElement.classList.toggle('warn', state.incidents.length > 0);

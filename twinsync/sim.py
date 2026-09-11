@@ -464,7 +464,11 @@ class Simulation:
             if tower_id in self.failed_towers:
                 self.failed_towers.discard(tower_id)
                 self.tower_status[tower_id] = "healthy"
-                self.detectors[tower_id].state = "healthy"
+                # Re-warm rather than just clearing the state flag. The baseline froze
+                # when the fault began, so the recovery transient scores as an anomaly
+                # against it and the site alarms again the instant it is repaired --
+                # which raised a duplicate incident and sent a second van.
+                self.detectors[tower_id].relearn()
                 # Drop the alarm from the clustering window too, or a resolved site
                 # keeps pulling later, unrelated faults into its cluster.
                 self.intelligence.release(tower_id)
@@ -540,6 +544,22 @@ class Simulation:
             })
         incidents.sort(key=lambda i: -i["priority"])
 
+        # Detection latency for the MTTD tile: every incident this run has raised.
+        #
+        # Deliberately a *different* population to metrics.collect, which only counts an
+        # incident once it is resolved so that MTTD and MTTR describe the same set. That
+        # filter is right for the A/B table and useless here: nothing resolves inside the
+        # 1,400 s guided demo, so a tile fed from it would read "--" for the entire
+        # presentation. Averaging every raised incident means the tile always agrees with
+        # the "after 2.8s" lines in the log beside it, which is the number a judge can
+        # actually check. The A/B table stays the authority on the committed comparison.
+        latencies = [
+            incident.detected_at - (incident.fault_started_at
+                                    if incident.fault_started_at is not None
+                                    else incident.detected_at)
+            for incident in self.dispatch.incidents.values()
+        ]
+
         distance_km = sum(c.distance_m for c in self.dispatch.crews) / 1000.0
 
         # Storm cells in lon/lat so the client can draw them without knowing about the
@@ -580,6 +600,12 @@ class Simulation:
 
         return {
             "t": round(self.t, 1),
+            "detection": {
+                "count": len(latencies),
+                "mean_s": (round(sum(latencies) / len(latencies), 2)
+                           if latencies else None),
+                "last_s": round(latencies[-1], 2) if latencies else None,
+            },
             "tower_status": dict(self.tower_status),
             "tower_digest": dict(self.state.tower_digest),
             "weather": {

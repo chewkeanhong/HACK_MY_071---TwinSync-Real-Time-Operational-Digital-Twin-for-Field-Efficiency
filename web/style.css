@@ -131,6 +131,13 @@ button.on { color: var(--bg); background: var(--ink); border-color: var(--ink); 
 .kpi-click { cursor: pointer; }
 .kpi-click:hover { border-color: rgba(120, 140, 180, 0.42); }
 .kpi.roi .k-value { color: var(--good); }
+/* MTTD is a win, not an alarm, so it reads green like the ROI tile.
+   No min-width override here on purpose: this is the eighth tile, and verify_ui.py
+   fails the run if the row wraps to two lines and covers the chaos panel. The note is
+   kept short enough to sit inside the shared 140px floor, and `nowrap` guarantees it
+   never wraps the comparison across two lines and grows the row instead. */
+.kpi.mttd .k-value { color: var(--good); }
+#kpi-mttd-note { white-space: nowrap; }
 /* Status only ever lands on the number, and the note says why in words. */
 .kpi.alert .k-value { color: var(--crit); }
 .kpi.warn  .k-value { color: var(--warn); }

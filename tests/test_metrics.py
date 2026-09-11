@@ -193,3 +193,95 @@ def test_baseline_incidents_carry_no_model_tag():
     assert incident.ai_cluster_id is None
     assert incident.ai_localised_at is None
     assert incident.ai_risk_factors == []
+
+
+# -- open incidents are charged too -------------------------------------
+#
+# subscriber_minutes_lost used to sum only *resolved* incidents, which quietly rewarded
+# an arm for leaving work undone: whichever arm reached the big site got billed for it
+# and the arm that never arrived did not. It stayed hidden while both arms happened to
+# finish the same jobs, and inverted the A/B the moment the scenario got hard enough
+# that they did not.
+
+
+class _Impact:
+    def __init__(self, subscribers: int):
+        self.subscribers = subscribers
+        self.dark_buildings: set[str] = set()
+        self.critical_sites: list[str] = []
+
+
+class _Incident:
+    def __init__(self, subscribers, detected_at, resolved_at=None,
+                 fault_started_at=None):
+        self.impact = _Impact(subscribers)
+        self.detected_at = detected_at
+        self.resolved_at = resolved_at
+        self.fault_started_at = fault_started_at
+        self.ai_localised_at = None
+
+    @property
+    def resolved(self) -> bool:
+        return self.resolved_at is not None
+
+
+class _Crew:
+    trips = 0
+    distance_m = 0.0
+    driving_s = 0.0
+    on_site_s = 0.0
+
+
+class _Engine:
+    batched_count = 0
+    reassignment_count = 0
+
+    def __init__(self, incidents):
+        self.incidents = {f"INC-{i}": inc for i, inc in enumerate(incidents)}
+        self.crews = [_Crew()]
+
+
+def test_an_unresolved_outage_still_costs_subscriber_minutes():
+    """100 subscribers dark from t=600 s to the t=3600 s window close: 50 min."""
+    from twinsync.metrics import collect
+
+    engine = _Engine([_Incident(100, detected_at=600.0, fault_started_at=600.0)])
+    run = collect("x", engine, elapsed_seconds=3600.0)
+
+    assert run.incidents_raised == 1
+    assert run.incidents_resolved == 0
+    assert run.subscriber_minutes_lost == pytest.approx(100 * 50.0)
+    # It never came back, so nothing was restored and it owes no resolution time.
+    assert run.subscribers_restored == 0
+    assert run.resolution_minutes == []
+    assert run.detection_minutes == []
+
+
+def test_finishing_a_job_cannot_score_worse_than_abandoning_it():
+    """The inversion, pinned: same fault, one arm repairs it, the other never arrives."""
+    from twinsync.metrics import collect
+
+    repaired = _Engine([_Incident(50_000, detected_at=60.0, fault_started_at=60.0,
+                                  resolved_at=1_860.0)])
+    abandoned = _Engine([_Incident(50_000, detected_at=60.0, fault_started_at=60.0)])
+
+    fast = collect("repaired", repaired, elapsed_seconds=3600.0)
+    slow = collect("abandoned", abandoned, elapsed_seconds=3600.0)
+
+    assert fast.subscriber_minutes_lost < slow.subscriber_minutes_lost, (
+        "repairing an outage must not cost more subscriber-minutes than ignoring it")
+
+
+def test_open_and_resolved_incidents_both_count():
+    from twinsync.metrics import collect
+
+    engine = _Engine([
+        _Incident(10, detected_at=0.0, fault_started_at=0.0, resolved_at=600.0),
+        _Incident(20, detected_at=0.0, fault_started_at=0.0),
+    ])
+    run = collect("x", engine, elapsed_seconds=1_200.0)
+
+    # 10 subs x 10 min resolved, plus 20 subs x 20 min still dark.
+    assert run.subscriber_minutes_lost == pytest.approx(10 * 10.0 + 20 * 20.0)
+    assert run.incidents_raised == 2
+    assert run.incidents_resolved == 1

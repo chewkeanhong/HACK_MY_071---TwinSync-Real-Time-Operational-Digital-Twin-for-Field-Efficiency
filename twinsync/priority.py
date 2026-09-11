@@ -18,7 +18,19 @@ from .coverage import CoverageEngine
 SEVERITY_WEIGHT = {"degraded": 0.45, "down": 1.0}
 
 # A site whose loss has consequences beyond revenue is worth this much extra each.
-CRITICAL_MULTIPLIER = 0.75
+#
+# Calibrated, not picked. The case this has to get right is the one an operator would be
+# judged on: a hospital or transit interchange on 3,000 subscribers, waiting eight
+# minutes, against a fresh commercial outage on 8,000. Reach alone hands that to the
+# commercial site 8.00 to 3.05. Beating it needs
+#
+#     (1 + M) > 8.0 / (3.0 * (1 + (8/60)**2))  ->  M > 1.62
+#
+# so 0.75 was never enough -- it only caught up at ~60 min, once the SLA term had almost
+# breached, which is far too late to be worth claiming. 2.5 clears the bar with margin
+# (10.69 vs 8.00) and is still finite: a critical site does not automatically outrank an
+# arbitrarily larger one, it outranks one roughly 3.5x its size.
+CRITICAL_MULTIPLIER = 2.5
 
 # Service-level agreement: the clock operators are actually judged against.
 DEFAULT_SLA_MINUTES = 60.0

@@ -1,5 +1,5 @@
 {
-  "name": "KL CBD -- three-act incident timeline",
+  "name": "KL CBD -- five-act incident timeline",
   "seed": 42,
   "duration_s": 3600.0,
   "sample_hz": 5.0,
@@ -50,13 +50,25 @@
       "tower": "KL-09",
       "profile": "backhaul_congestion",
       "start_s": 700.0,
-      "note": "Act 3: a third fault occupies the remaining crew, so the fleet is fully committed when the big one lands."
+      "note": "Act 3: a third fault, too far from the first two in space and time to share a cause -- ST-DBSCAN labels it ISOLATED. It also commits the second of three vans, which is what leaves the fleet saturated by the time KL-04 lands."
     },
     {
       "tower": "KL-06",
       "profile": "power_failure",
       "start_s": 1150.0,
-      "note": "Act 4: the transit-hub site loses power entirely -- 157,000 subscribers. Every crew is busy, so it preempts."
+      "note": "Act 4: mains failure completes the four-site cascade. This is the only window in the run where the 3D verdict reads 47 buildings / 9,026 subscribers against the flat model's 3 -- it opens here and closes 100 s later when KL-07 lands, so the headline beat sits at t=1200."
+    },
+    {
+      "tower": "KL-07",
+      "profile": "antenna_misalignment",
+      "start_s": 1250.0,
+      "note": "Act 5: the fourth van's job. Deliberately a small fault on a distant site -- 909 m from every other faulted tower, so it neither batches onto an in-flight trip nor joins a cluster, and it carries no critical infrastructure. Its only job in the scenario is to commit CREW-D, which is what makes KL-04 arrive at a saturated fleet and the preemption branch reachable on a four-van fleet."
+    },
+    {
+      "tower": "KL-04",
+      "profile": "power_failure",
+      "start_s": 1400.0,
+      "note": "Act 6: the site nobody can ignore -- 42,053 subscribers of its own, two pieces of critical infrastructure, and an incident covering the whole cumulative dark set. It lands with all four vans committed, so dispatch preempts and pulls a crew off a smaller job mid-route. 857 m from KL-03 but far outside the ten-minute window, so ST-DBSCAN still calls it ISOLATED rather than joining CL-001."
     }
   ],
   "congestion": [

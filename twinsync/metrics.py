@@ -270,6 +270,25 @@ def collect(label: str, engine: DispatchEngine, *, sla_minutes: float = 60.0,
             metrics.subscribers_restored += incident.impact.subscribers
             if minutes > sla_minutes:
                 metrics.sla_breaches += 1
+        else:
+            # Still dark when the window closed, and it has to be charged for that.
+            #
+            # Counting only repaired incidents rewards an arm for leaving work
+            # undone: the same trap as timing MTTR from detection, one level down.
+            # It stayed hidden while both arms happened to finish the same three
+            # jobs, and showed up the moment the scenario got hard enough that they
+            # did not -- the arm that reached the 52,725-subscriber site was billed
+            # for it and the arm that never got there was not, which made doing less
+            # work look like losing fewer subscriber-minutes.
+            #
+            # MTTD, MTTL and MTTR stay resolved-only on purpose: those three are a
+            # matched set describing incidents that ran their full course. This is a
+            # running total of harm, which is a different question.
+            began = (incident.fault_started_at
+                     if incident.fault_started_at is not None else incident.detected_at)
+            open_minutes = max(0.0, (elapsed_seconds - began) / 60.0)
+            metrics.subscriber_minutes_lost += (
+                open_minutes * incident.impact.subscribers)
 
     metrics.truck_rolls = sum(c.trips for c in engine.crews)
     metrics.truck_rolls_saved = engine.batched_count
