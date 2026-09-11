@@ -691,7 +691,7 @@ function riskFactorsHtml(towerId) {
          `<br><span style="font-size:11px;opacity:.8">SHAP: ${rows}</span>`;
 }
 
-/* The annualised saving, projected from the committed A/B run.
+/* Annualised service restored, projected from the committed A/B run.
  *
  * It cannot come off the WebSocket: the live server runs one dispatch arm, so there is
  * no baseline to compare against in-process. /api/metrics reads the headless A/B result

@@ -51,7 +51,7 @@ model artifacts are committed. Conference wifi cannot break this demo.
 
 ```bash
 python -m twinsync.sim --scenario data/scenario.json --seed 42   # headless, both arms
-pytest tests/ -q                                                 # 175 tests
+pytest tests/ -q                                                 # 212 tests
 python scripts/verify_ui.py http://127.0.0.1:8000 shots/         # real browser
 ```
 
@@ -165,9 +165,12 @@ never once executed. The fault list is one longer than the fleet now, `reassignm
 saving. That is the honest exchange rate.
 
 **The two multipliers are the weakest part of this number, so the dashboard lets you
-change them.** Click the "annualised saving" tile and it cycles 2,000 → 5,000 → 10,000 →
-500 sites live; `GET /api/metrics?sites=5000&incidents_per_site=6` does the same over
-HTTP. The per-incident savings underneath are measured; only the scaling is assumed.
+change them.** Click the "service restored / yr" tile and it cycles 2,000 → 5,000 →
+10,000 → 500 sites live — 19.8M subscriber-hours becomes 49.4M and back;
+`GET /api/metrics?sites=5000&incidents_per_site=6` does the same over HTTP. The
+per-incident figure underneath is measured; only the scaling is assumed. The tile reports
+restored service rather than ringgit because, as the table above says, the truck-roll
+saving on this scenario is zero at every fleet size.
 
 **The 28 % MTTR gain is mostly detection, not repair**, because on-site repair time
 dominates and is identical in both arms — the ten minutes the baseline spends waiting
@@ -323,6 +326,24 @@ OSM. Imputed buildings are tinted differently in the UI so a guess never reads a
 **MTTR measured from detection made early detection worthless by construction.** An
 outage found after an hour and fixed in twenty minutes scored better than one caught
 instantly and fixed in twenty-five. The clock now starts when service broke.
+
+**Counting only repaired outages rewarded the arm that left work undone.**
+`subscriber_minutes_lost` summed resolved incidents only, so whichever arm actually
+reached the 53,399-subscriber site was billed for it and the arm that never got there was
+not. It stayed hidden while both arms happened to finish the same three jobs, and it
+inverted the entire A/B the moment the scenario got hard enough that they did not.
+Unrepaired outages now accrue to the end of the window, in both arms.
+
+**A baseline that freezes during a fault re-alarms the moment you repair the site.** Not
+learning during a fault is correct — otherwise the detector quietly accepts the fault as
+normal. But the frozen mean also holds whatever *environmental* offset was in force when
+the fault was detected, so a fault spanning a passing storm keeps a mean learned in 95
+mm/hr rain. Repair that site in dry air and its perfectly healthy telemetry sits several
+sigma out: it alarmed the instant the crew fixed it, raised a duplicate incident, and sent
+a second van. Repairs now re-seed the mean and re-warm (`EdgeDetector.relearn`). **Only**
+the mean — resetting the variance as well was the first attempt, and it traded one false
+incident for another, because at α=0.002 the variance needs hundreds of samples to
+reconverge and every z-score is inflated until it does.
 
 **Isolation Forest alone caused 18 false alarms per 2,000 samples.** `contamination=0.02`
 means it flags ~2 % of *normal* data by design. It is now calibrated against its own

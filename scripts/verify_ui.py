@@ -108,10 +108,23 @@ def distinct_colours(png_bytes: bytes, sample: int = 40) -> int:
 # Beats the README embeds, under stable filenames. The beat files themselves are named
 # from their titles, so editing a caption would silently break every image link in the
 # README; these aliases are what the docs point at.
+#
+# Indices move whenever a beat is inserted into data/demo.json -- adding KL-07 and the
+# sixth act pushed the flood beat from 7 to 9 -- so the assertion below checks the title
+# rather than trusting the number, and fails loudly instead of quietly shipping the
+# wrong still into the README.
 README_SHOTS = {
     2: "readme-3d.png",         # a fault, seen against the extruded city
-    7: "readme-monsoon.png",    # DEM + storm + OSM repricing a route
-    11: "readme-compare.png",   # the money shot: all four sites down, 47 vs 3
+    9: "readme-monsoon.png",    # DEM + storm + OSM repricing a route
+    11: "readme-compare.png",   # the money shot: four sites down, 47 vs 3
+}
+
+# What each aliased beat must be about, as a substring of its title. A caption reword is
+# fine; a beat landing somewhere else entirely is not.
+README_SHOT_GUARDS = {
+    2: "amplifier",
+    9: "three sources",
+    11: "flat map never saw",
 }
 
 
@@ -188,6 +201,12 @@ def capture_beats(page) -> None:
         page.screenshot(path=str(OUT / name))
         alias = README_SHOTS.get(index)
         if alias:
+            want = README_SHOT_GUARDS.get(index, "")
+            if want and want not in beat["title"].lower():
+                errors.append(
+                    f"{alias} would be captured from beat {index} "
+                    f"({beat['title']!r}), which is not about {want!r} -- the demo track "
+                    f"changed, so README_SHOTS needs its indices updated")
             page.screenshot(path=str(OUT / alias))
         print(f"  {target:>5.0f}s  beat {active}  {name}"
               + (f"  -> {alias}" if alias else ""))
