@@ -474,7 +474,8 @@ def run():
         # moves the caption while the screen stays where it was -- which would put a
         # number in the presenter's mouth that is not on screen.
         nav = lambda: page.evaluate("""() => ({
-            beat: demoBeat, t: state.t, canSeek: demoCanSeek,
+            beat: demoBeat, t: state.t, recorded: demoRecorded,
+            recording: demoRecording,
             badge: document.getElementById('tour-mode').hidden
                 ? null : document.getElementById('tour-mode').textContent,
         })""")
@@ -485,12 +486,20 @@ def run():
             pass
         beats = page.evaluate("() => demoTrack.beats")
         before = nav()
-        if not before["canSeek"]:
-            # A fresh clone has no recording, which is a setup step rather than a bug --
-            # but the card must say so rather than offering a button that does nothing.
-            warnings.append(
-                f"beat jumping unavailable ({before['badge']!r}); run "
-                f"scripts/bake_checkpoints.py to exercise it")
+        if before["recorded"] <= before["beat"] + 1:
+            # The server records jump points in the background on a fresh clone, so the
+            # beat after this one may simply not be ready yet. Not a bug -- but the card
+            # must say so, rather than offering a button that does nothing.
+            if not before["badge"]:
+                errors.append("beat jumping is not ready but the card does not say why")
+            if not before["recording"]:
+                warnings.append(
+                    f"beat jumping unavailable and nothing is recording "
+                    f"({before['badge']!r}); jumps were not exercised")
+            else:
+                warnings.append(
+                    f"jump points still recording ({before['recorded']}/{len(beats)}); "
+                    f"jumps were not exercised this run")
         elif before["beat"] >= len(beats) - 1:
             warnings.append("the demo was already on its last beat; jumping was not "
                             "exercised this run")

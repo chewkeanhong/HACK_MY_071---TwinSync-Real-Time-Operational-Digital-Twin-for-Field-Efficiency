@@ -17,6 +17,8 @@ import asyncio
 import json
 import math
 import os
+import subprocess
+import sys
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -124,13 +126,75 @@ class Engine:
 
 engine = Engine()
 
+# Set TWINSYNC_RECORD_CHECKPOINTS=0 to stop the server recording jump points on start.
+RECORD_CHECKPOINTS = os.environ.get("TWINSYNC_RECORD_CHECKPOINTS", "1").lower() not in {
+    "0", "false", "no", "off"}
+
+_recorder: subprocess.Popen | None = None
+
+
+def start_checkpoint_recorder() -> None:
+    """Record the guided demo's jump points in the background, if they are not current.
+
+    The recording is not committed (127 MB, and tied to the code that produced it), so a
+    fresh clone -- a teammate's laptop, the presentation machine, a container -- starts
+    without one. It used to wait for somebody to remember a manual command; now the server
+    starts it, and each beat becomes jumpable as soon as it is recorded.
+
+    A separate process rather than a thread: the simulation is pure-Python CPU work, and in
+    this process it would hold the GIL and stall the frames the live demo is pushing. It
+    also runs at below-normal priority, so on a laptop the dashboard keeps first call on
+    the CPU while the recorder takes what is left.
+    """
+    global _recorder
+    if not RECORD_CHECKPOINTS:
+        return
+    beats = _demo_beats()
+    if not beats:
+        return
+    manifest = checkpoints.load_manifest(DATA_DIR, beats)
+    directory = DATA_DIR / checkpoints.CHECKPOINT_DIR_NAME
+    if manifest.complete or checkpoints.is_recording(directory):
+        return
+
+    options: dict = {}
+    if os.name == "nt":
+        options["creationflags"] = subprocess.BELOW_NORMAL_PRIORITY_CLASS
+    else:
+        options["preexec_fn"] = lambda: os.nice(10)
+    root = Path(__file__).resolve().parents[1]
+    environment = {**os.environ, "PYTHONUNBUFFERED": "1",
+                   "PYTHONPATH": os.pathsep.join(
+                       filter(None, [str(root), os.environ.get("PYTHONPATH", "")]))}
+    _recorder = subprocess.Popen(
+        [sys.executable, "-m", "twinsync.checkpoints", "--data", str(DATA_DIR.resolve())],
+        cwd=root, env=environment, **options)
+
+
+def stop_checkpoint_recorder() -> None:
+    """Stop the recorder with the server. It resumes from its last beat next time."""
+    if _recorder is not None and _recorder.poll() is None:
+        _recorder.terminate()
+        try:
+            _recorder.wait(timeout=10)
+        except subprocess.TimeoutExpired:
+            _recorder.kill()
+
+
+def recorder_running() -> bool:
+    directory = DATA_DIR / checkpoints.CHECKPOINT_DIR_NAME
+    own = _recorder is not None and _recorder.poll() is None
+    return own or checkpoints.is_recording(directory)
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     engine.load()
     task = asyncio.create_task(engine.run_loop())
+    start_checkpoint_recorder()
     yield
     task.cancel()
+    stop_checkpoint_recorder()
 
 
 app = FastAPI(title="TwinSync", lifespan=lifespan)
@@ -484,9 +548,12 @@ def _demo_beats() -> list[dict]:
     if not path.exists():
         return []
     try:
-        return json.loads(path.read_text(encoding="utf-8")).get("beats", [])
+        beats = json.loads(path.read_text(encoding="utf-8")).get("beats", [])
     except (OSError, json.JSONDecodeError):
         return []
+    # Same order the recorder and the dashboard use, so beat N means the same beat in all
+    # three and the fingerprint is computed over the same sequence.
+    return sorted(beats, key=lambda b: b["t_s"])
 
 
 @app.get("/api/demo")
@@ -505,18 +572,31 @@ async def get_demo():
 
 @app.get("/api/demo/checkpoints")
 async def demo_checkpoints():
-    """Which beats the presenter can jump to, and why not if they cannot.
+    """Which beats the presenter can jump to right now, and how far recording has got.
 
-    The client asks once at load so the Prev/Next buttons can say what is wrong instead
-    of failing silently: a missing or stale recording is a five-minute fix with
-    `scripts/bake_checkpoints.py`, but only if somebody is told before they are on stage.
+    Beats are recorded in order and each is usable as soon as it lands, so `recorded` is
+    the number of beats from the start that Prev/Next can reach. The client polls this
+    while `recording` is true, enabling the buttons beat by beat.
     """
     beats = _demo_beats()
     if not beats:
-        return {"available": False, "reason": "no demo track", "beats": 0}
+        return {"available": False, "recorded": 0, "total": 0, "complete": False,
+                "recording": False, "reason": "no demo track"}
     manifest = checkpoints.load_manifest(DATA_DIR, beats)
-    return {"available": manifest.usable, "reason": manifest.reason,
-            "beats": len(manifest.beats) if manifest.usable else 0}
+    recording = recorder_running()
+    recorded = 0 if manifest.stale else len(manifest.beats)
+    if manifest.complete:
+        reason = ""
+    elif recording:
+        reason = (f"recording jump points: {recorded}/{len(beats)} ready -- the rest "
+                  "become available as they are recorded")
+    elif manifest.stale:
+        reason = manifest.reason
+    else:
+        reason = (f"only {recorded}/{len(beats)} beats recorded and no recorder running "
+                  "-- restart the server or run scripts/bake_checkpoints.py")
+    return {"available": manifest.usable, "recorded": recorded, "total": len(beats),
+            "complete": manifest.complete, "recording": recording, "reason": reason}
 
 
 @app.post("/api/demo/seek/{index}")
@@ -531,11 +611,15 @@ async def demo_seek(index: int):
     beats = _demo_beats()
     if not beats:
         return JSONResponse({"error": "no demo track"}, status_code=404)
-    manifest = checkpoints.load_manifest(DATA_DIR, beats)
-    if not manifest.usable:
-        return JSONResponse({"error": manifest.reason}, status_code=409)
-    if not 0 <= index < len(manifest.beats):
+    if not 0 <= index < len(beats):
         return JSONResponse({"error": f"no beat {index}"}, status_code=404)
+    manifest = checkpoints.load_manifest(DATA_DIR, beats)
+    if not manifest.has(index):
+        # 409 rather than 404: the beat exists, its recording just is not there yet.
+        detail = (manifest.reason if manifest.stale else
+                  f"beat {index + 1} is not recorded yet "
+                  f"({len(manifest.beats)}/{len(beats)} ready)")
+        return JSONResponse({"error": detail}, status_code=409)
 
     async with engine._lock:
         if engine.sim is None:

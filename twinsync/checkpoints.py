@@ -27,7 +27,9 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import pickle
+import time
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -109,10 +111,17 @@ class _Unpickler(pickle.Unpickler):
 
 
 def save(sim, path: Path) -> int:
-    """Write one simulation state. Returns the size on disk, in bytes."""
+    """Write one simulation state. Returns the size on disk, in bytes.
+
+    Written beside the target and renamed into place, so a recorder killed mid-write
+    leaves the previous file (or nothing) rather than a truncated pickle the server would
+    later try to restore.
+    """
     path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("wb") as handle:
+    partial = path.with_suffix(path.suffix + ".partial")
+    with partial.open("wb") as handle:
         _Pickler(handle, _Sharing(sim)).dump(sim)
+    os.replace(partial, path)
     return path.stat().st_size
 
 
@@ -128,16 +137,29 @@ def load(path: Path, template) -> object:
 
 @dataclass(frozen=True)
 class Manifest:
-    """What was recorded, and whether it still describes the running code."""
+    """What was recorded, and whether it still describes the running code.
+
+    A recording is a *prefix* of the track: beats are recorded in order, and each one is
+    usable the moment it lands. So while the server is still recording, the beats it has
+    already reached can be jumped to, and the rest wait.
+    """
 
     directory: Path
-    beats: list[dict]
+    beats: list[dict]                  # the recorded prefix
     stale: bool
     reason: str = ""
+    total: int = 0                     # beats on the track
 
     @property
     def usable(self) -> bool:
         return not self.stale and bool(self.beats)
+
+    @property
+    def complete(self) -> bool:
+        return not self.stale and len(self.beats) == self.total
+
+    def has(self, index: int) -> bool:
+        return not self.stale and 0 <= index < len(self.beats)
 
     def path_for(self, index: int) -> Path:
         return self.directory / f"beat-{index:02d}.pkl"
@@ -153,37 +175,199 @@ def load_manifest(data_dir: Path, beats: list[dict]) -> Manifest:
     better stage failure than a confident jump into a scenario that no longer exists.
     """
     directory = data_dir / CHECKPOINT_DIR_NAME
+    total = len(beats)
     manifest_path = directory / MANIFEST_NAME
     if not manifest_path.exists():
         return Manifest(directory, [], True,
-                        "no checkpoints recorded -- run scripts/bake_checkpoints.py")
+                        "no checkpoints recorded yet -- the server records them when it "
+                        "starts, or run scripts/bake_checkpoints.py", total)
     try:
         saved = json.loads(manifest_path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
-        return Manifest(directory, [], True, f"unreadable checkpoint manifest: {exc}")
+        return Manifest(directory, [], True, f"unreadable checkpoint manifest: {exc}",
+                        total)
 
     if saved.get("fingerprint") != fingerprint(data_dir, beats):
         return Manifest(directory, [], True,
                         "checkpoints are stale (the scenario or the simulation changed) "
-                        "-- re-run scripts/bake_checkpoints.py")
+                        "-- they are re-recorded when the server starts", total)
     recorded = saved.get("beats", [])
-    if len(recorded) != len(beats):
+    if len(recorded) > total:
         return Manifest(directory, [], True,
-                        f"checkpoints cover {len(recorded)} beats but the track has "
-                        f"{len(beats)} -- re-run scripts/bake_checkpoints.py")
+                        f"checkpoint manifest lists {len(recorded)} beats but the track "
+                        f"has {total}", total)
     missing = [i for i in range(len(recorded))
                if not (directory / f"beat-{i:02d}.pkl").exists()]
     if missing:
         return Manifest(directory, [], True,
-                        f"checkpoint files missing for beats {missing} -- re-run "
-                        "scripts/bake_checkpoints.py")
-    return Manifest(directory, recorded, False)
+                        f"checkpoint files missing for beats {missing} -- they are "
+                        "re-recorded when the server starts", total)
+    return Manifest(directory, recorded, False, "", total)
 
 
 def write_manifest(directory: Path, data_dir: Path, beats: list[dict],
                    recorded: list[dict]) -> None:
+    """Record which beats exist. Atomic, because the server reads it while it grows."""
     directory.mkdir(parents=True, exist_ok=True)
-    (directory / MANIFEST_NAME).write_text(
+    target = directory / MANIFEST_NAME
+    partial = target.with_suffix(".json.partial")
+    partial.write_text(
         json.dumps({"fingerprint": fingerprint(data_dir, beats),
                     "beats": recorded}, indent=2),
         encoding="utf-8")
+    os.replace(partial, target)
+
+
+# -- recording ------------------------------------------------------------
+#
+# Recording used to be a manual step, and the recording is deliberately not committed
+# (127 MB, and specific to the code that made it). So every fresh clone, every teammate's
+# laptop and every container started with the jump buttons dead until somebody remembered
+# an eight-minute command -- which is exactly the kind of step that gets forgotten on the
+# day. The server now starts a recorder itself; this is what it runs.
+
+LOCK_NAME = ".recording.lock"
+
+# The recorder touches the lock as it works. One that has not been touched for this long
+# belongs to a process that died, and a new recorder may take over.
+LOCK_STALE_S = 180.0
+
+# Steps between lock touches -- about twenty seconds of work at ~80 ms a step.
+HEARTBEAT_STEPS = 250
+
+
+def is_recording(directory: Path) -> bool:
+    """True while a live recorder holds the lock for this directory."""
+    lock = directory / LOCK_NAME
+    try:
+        return time.time() - lock.stat().st_mtime < LOCK_STALE_S
+    except FileNotFoundError:
+        return False
+
+
+def _acquire_lock(directory: Path) -> Path | None:
+    """Take the recording lock, or return None if a live recorder already has it.
+
+    Two recorders writing the same files would be two processes each believing their
+    beat-05 is the real one. The lock is a plain file created exclusively; its age is the
+    heartbeat, so a recorder that was killed does not block the next one for ever.
+    """
+    lock = directory / LOCK_NAME
+    for _ in range(2):
+        try:
+            handle = os.open(lock, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+        except FileExistsError:
+            if is_recording(directory):
+                return None
+            lock.unlink(missing_ok=True)          # its owner died; take over
+            continue
+        os.write(handle, str(os.getpid()).encode())
+        os.close(handle)
+        return lock
+    return None
+
+
+def _touch(lock: Path) -> None:
+    try:
+        os.utime(lock)
+    except OSError:
+        pass
+
+
+def _clear(directory: Path) -> None:
+    for path in directory.glob("beat-*.pkl*"):
+        path.unlink(missing_ok=True)
+    (directory / MANIFEST_NAME).unlink(missing_ok=True)
+
+
+def record(data_dir: Path, *, force: bool = False, log=print) -> int:
+    """Record a checkpoint at every beat, resuming whatever an earlier run already saved.
+
+    Returns the number of beats recorded by *this* call. Safe to call when the recording
+    is already complete (it does nothing) or when another recorder is running (it leaves
+    that one to finish).
+    """
+    # Deferred: the simulation pulls in the models, and nothing else in this module --
+    # nor the tests of it -- should pay for that.
+    from .routing import RoadNetwork
+    from .sim import Simulation, load_all
+
+    beats = json.loads((data_dir / "demo.json").read_text(encoding="utf-8"))["beats"]
+    beats = sorted(beats, key=lambda b: b["t_s"])
+    directory = data_dir / CHECKPOINT_DIR_NAME
+    directory.mkdir(parents=True, exist_ok=True)
+
+    lock = _acquire_lock(directory)
+    if lock is None:
+        log("checkpoints: another recorder is already running; leaving it to finish")
+        return 0
+    try:
+        manifest = load_manifest(data_dir, beats)
+        if manifest.complete and not force:
+            log(f"checkpoints: all {len(beats)} beats already recorded")
+            return 0
+        if manifest.stale or force:
+            _clear(directory)
+            recorded: list[dict] = []
+        else:
+            recorded = list(manifest.beats)
+
+        world, coverage, _ = load_all(data_dir, verbose=False)
+        scenario = json.loads((data_dir / "scenario.json").read_text(encoding="utf-8"))
+        # A fresh road network, exactly as the server builds one per run.
+        network = RoadNetwork.load(data_dir / "roads.geojson", world.frame,
+                                   terrain=world.terrain)
+        sim = Simulation(world, coverage, network, scenario,
+                         smart=True, seed=int(scenario.get("seed", 42)))
+        if recorded:
+            # Resume rather than replay from zero. The simulation is deterministic, so
+            # continuing from the last saved state is identical to never having stopped.
+            sim = load(directory / f"beat-{len(recorded) - 1:02d}.pkl", sim)
+            log(f"checkpoints: resuming after beat {len(recorded)}/{len(beats)} "
+                f"(t={sim.t:.0f} s)")
+        else:
+            log(f"checkpoints: recording {len(beats)} beats (~8 min, in the background)")
+
+        dt = 1.0 / sim.sample_hz
+        started = time.time()
+        made = 0
+        for index in range(len(recorded), len(beats)):
+            target = float(beats[index]["t_s"])
+            steps = 0
+            # Step exactly as the server does -- same dt, same order -- so the saved state
+            # is the one the live run reaches.
+            while sim.t < target - 1e-9:
+                sim.step(dt)
+                steps += 1
+                if steps % HEARTBEAT_STEPS == 0:
+                    _touch(lock)
+            size = save(sim, directory / f"beat-{index:02d}.pkl")
+            recorded.append({"t_s": target, "title": beats[index].get("title", ""),
+                             "bytes": size})
+            # After every beat, not at the end: each one is jumpable as soon as it lands.
+            write_manifest(directory, data_dir, beats, recorded)
+            _touch(lock)
+            made += 1
+            log(f"checkpoints: beat {index + 1:2d}/{len(beats)} recorded "
+                f"(t={target:.0f} s, {time.time() - started:.0f} s elapsed)")
+        log(f"checkpoints: complete -- Prev/Next can reach all {len(beats)} beats")
+        return made
+    finally:
+        lock.unlink(missing_ok=True)
+
+
+def main(argv=None) -> int:
+    import argparse
+
+    parser = argparse.ArgumentParser(
+        description="Record the guided demo's jump points (resumes if interrupted).")
+    parser.add_argument("--data", default="data", type=Path)
+    parser.add_argument("--force", action="store_true",
+                        help="discard any existing recording and start again")
+    args = parser.parse_args(argv)
+    record(args.data, force=args.force, log=lambda line: print(line, flush=True))
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

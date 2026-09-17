@@ -1335,13 +1335,22 @@ let demoAwaitingReset = false;
  * over five. Instead the server restores that beat's recorded simulation state, so the
  * map, the queue, the log and the clock all arrive together, and the run carries on from
  * there. Replaying to the instant would take minutes, hence the recording; see
- * `twinsync/checkpoints.py` and `scripts/bake_checkpoints.py`.
+ * `twinsync/checkpoints.py`.
  *
- * `demoCanSeek` is false when no recording exists or it is stale, which is a setup
- * mistake worth surfacing on the card rather than a dead button. */
-let demoCanSeek = false;
+ * The server records those states itself on first start, beat by beat, so on a fresh
+ * clone the buttons come alive progressively rather than all at once. `demoRecorded` is
+ * how many beats from the start are ready; the card polls while recording continues. */
+let demoRecorded = 0;
+let demoRecordTotal = 0;
+let demoRecording = false;
 let demoSeekReason = 'checking…';
 let demoSeeking = false;
+let demoPollTimer = null;
+
+/** Beats are recorded in order, so a beat is reachable once the recording has passed it. */
+function canJumpTo(index) {
+  return !!demoTrack && index >= 0 && index < demoTrack.beats.length && index < demoRecorded;
+}
 
 async function startDemo() {
   if (!demoTrack) return;
@@ -1363,6 +1372,8 @@ async function startDemo() {
   demoBeat = -1;
   demoAwaitingReset = true;
   demoSeeking = false;
+  // The recording may have finished (or restarted) since the page loaded.
+  loadCheckpointState();
   document.body.classList.add('demo-on');
   $('tour').hidden = false;
   $('btn-demo').classList.add('on');
@@ -1408,10 +1419,9 @@ async function stepDemo(delta) {
   // Mid-reset the clock still belongs to the previous run, so `demoBeat` is not yet
   // meaningful; and two seeks at once would race each other's restore.
   if (!demoOn || !demoTrack || !state || demoAwaitingReset || demoSeeking) return;
-  if (!demoCanSeek) return;
   const last = demoTrack.beats.length - 1;
   const target = Math.max(0, Math.min(last, demoBeat + delta));
-  if (target === demoBeat) return;
+  if (target === demoBeat || !canJumpTo(target)) return;
 
   demoSeeking = true;
   renderDemoNav();
@@ -1419,8 +1429,10 @@ async function stepDemo(delta) {
     const response = await fetch(`/api/demo/seek/${target}`, {method: 'POST'});
     const body = await response.json().catch(() => ({}));
     if (!response.ok) {
-      demoCanSeek = false;
-      demoSeekReason = body.error || `seek failed (${response.status})`;
+      // Usually the recording moved under us -- a re-record after a code change. Ask
+      // again rather than disabling the buttons for good.
+      demoSeekReason = body.error || `jump failed (${response.status})`;
+      loadCheckpointState();
       return;
     }
     // The clock has moved, so anything accumulated for the old instant is wrong: crew
@@ -1432,8 +1444,7 @@ async function stepDemo(delta) {
     // Paint the beat now rather than waiting for the next frame to derive it.
     applyBeat(target);
   } catch (err) {
-    demoCanSeek = false;
-    demoSeekReason = 'seek request failed';
+    demoSeekReason = 'jump request failed';
   } finally {
     demoSeeking = false;
     renderDemoNav();
@@ -1442,36 +1453,58 @@ async function stepDemo(delta) {
 
 /** Enable, disable and explain the step buttons. */
 function renderDemoNav() {
-  const last = demoTrack ? demoTrack.beats.length - 1 : 0;
-  const blocked = !demoCanSeek || demoSeeking;
-  $('tour-prev').disabled = blocked || demoBeat <= 0;
-  $('tour-next').disabled = blocked || demoBeat >= last;
+  const explain = (index) => {
+    if (index < 0 || !demoTrack || index >= demoTrack.beats.length) return '';
+    if (canJumpTo(index)) return '';
+    return demoRecording
+      ? `Beat ${index + 1} is still being recorded (${demoRecorded}/${demoRecordTotal} ready)`
+      : demoSeekReason;
+  };
+  const setButton = (id, index, label) => {
+    const button = $(id);
+    button.disabled = demoSeeking || !canJumpTo(index);
+    const why = explain(index);
+    button.title = why || `${label} (the scenario clock jumps with it)`;
+  };
+  setButton('tour-prev', demoBeat - 1, 'Previous beat — ← or PageUp');
+  setButton('tour-next', demoBeat + 1, 'Next beat — → or PageDown');
 
+  // Kept short: a long sentence here used to squeeze the step counter into a column.
+  // The full explanation lives in the tooltip.
   const badge = $('tour-mode');
-  // Only worth saying when something is wrong or in flight; in the normal case the
-  // buttons speak for themselves and the card should stay about the scenario.
+  let text = '';
   if (demoSeeking) {
-    badge.hidden = false;
-    badge.textContent = 'jumping…';
-  } else if (!demoCanSeek) {
-    badge.hidden = false;
-    badge.textContent = demoSeekReason;
-  } else {
-    badge.hidden = true;
+    text = 'jumping…';
+  } else if (demoRecording && demoRecorded < demoRecordTotal) {
+    text = `recording jumps ${demoRecorded}/${demoRecordTotal}`;
+  } else if (demoRecordTotal && demoRecorded < demoRecordTotal) {
+    text = 'jumps unavailable';
   }
+  badge.hidden = !text;
+  badge.textContent = text;
+  badge.title = demoSeekReason;
 }
 
-/** Ask whether the recorded states exist and match the running code. */
+/** Ask how many beats are recorded; keep asking while the server is still recording. */
 async function loadCheckpointState() {
   try {
     const body = await (await fetch('/api/demo/checkpoints')).json();
-    demoCanSeek = !!body.available;
-    demoSeekReason = body.reason || 'jumping unavailable';
+    demoRecorded = body.recorded || 0;
+    demoRecordTotal = body.total || 0;
+    demoRecording = !!body.recording;
+    demoSeekReason = body.reason || '';
   } catch (err) {
-    demoCanSeek = false;
-    demoSeekReason = 'jumping unavailable';
+    demoRecording = false;
+    demoSeekReason = 'could not reach the server to check jump points';
   }
   if (demoTrack) renderDemoNav();
+
+  clearTimeout(demoPollTimer);
+  if (demoRecording && demoRecorded < demoRecordTotal) {
+    // Each beat takes tens of seconds to record; five seconds is prompt enough to light a
+    // button up without adding meaningful load.
+    demoPollTimer = setTimeout(loadCheckpointState, 5000);
+  }
 }
 
 function updateDemo() {

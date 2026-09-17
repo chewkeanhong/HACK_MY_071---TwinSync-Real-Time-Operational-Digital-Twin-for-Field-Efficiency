@@ -44,12 +44,18 @@ python -m uvicorn twinsync.server:app --port 8000
 Then press **`D`** for the guided demo: it restarts the scenario and narrates the whole
 cascade itself, so nothing depends on remembering the script. The `‹ Prev` / `Next ›`
 buttons on the caption card — or **← / →** and **PageUp / PageDown**, so a presentation
-clicker works — jump the scenario clock to that beat, screen and all. That needs
-`python scripts/bake_checkpoints.py` to have been run once (~8 min), so it works on the
-local run rather than in the container: the recordings are ~127 MB of pickled state tied
-to the code that produced them, deliberately kept out of both git and the image. Without
-them the demo still plays start to finish and the buttons simply say why they are
-disabled. See [DEMO_SCRIPT.md](DEMO_SCRIPT.md) for the beat-by-beat.
+clicker works — jump the scenario clock to that beat, screen and all.
+
+Jumping restores a recorded state for each beat, and **the server records those itself**
+the first time it starts: in a low-priority background process, about eight minutes, each
+beat usable as soon as it lands. So on a fresh clone the buttons come alive beat by beat
+while you set up — start the server a few minutes before you present. The recording is
+~127 MB of pickled state tied to the code that made it, so it is kept out of git and the
+image, resumes if interrupted, and is re-recorded automatically after the scenario or the
+simulation changes. In a container it is recorded afresh on each new container.
+`python scripts/bake_checkpoints.py` records it up front instead;
+`TWINSYNC_RECORD_CHECKPOINTS=0` turns the automatic recording off. See
+[DEMO_SCRIPT.md](DEMO_SCRIPT.md) for the beat-by-beat.
 
 **Runs entirely offline.** No map tiles, no CDN, no API keys — deck.gl is vendored, the
 roads are drawn from our own GeoJSON, the DEM grid, the Sentinel-2 NDVI bake and both

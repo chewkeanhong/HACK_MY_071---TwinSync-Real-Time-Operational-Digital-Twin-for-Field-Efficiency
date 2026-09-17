@@ -14,6 +14,8 @@ world loading for no extra coverage of this module.
 from __future__ import annotations
 
 import json
+import os
+import time
 from dataclasses import dataclass, field
 
 import pytest
@@ -191,3 +193,68 @@ def test_a_deleted_file_invalidates_the_recording(scenario_dir):
 
     assert not manifest.usable
     assert "missing" in manifest.reason
+
+
+# -- a recording in progress ----------------------------------------------
+#
+# The server records jump points itself on a fresh clone, beat by beat. So a recording
+# that has only reached part of the track is not broken -- the beats it has are usable
+# now, and the rest are not yet.
+
+
+def test_a_partial_recording_reaches_the_beats_it_has(scenario_dir):
+    track = [{"t_s": 0}, {"t_s": 45}, {"t_s": 185}]
+    write_recording(scenario_dir, track[:2], checkpoints.fingerprint(scenario_dir, track))
+
+    manifest = checkpoints.load_manifest(scenario_dir, track)
+
+    assert manifest.usable
+    assert not manifest.complete
+    assert manifest.has(0) and manifest.has(1)
+    assert not manifest.has(2), "beat 3 is not recorded yet and must not be reachable"
+
+
+def test_complete_only_once_every_beat_is_recorded(scenario_dir):
+    track = [{"t_s": 0}, {"t_s": 45}]
+    write_recording(scenario_dir, track, checkpoints.fingerprint(scenario_dir, track))
+
+    assert checkpoints.load_manifest(scenario_dir, track).complete
+
+
+def test_a_stale_recording_reaches_nothing(scenario_dir):
+    track = [{"t_s": 0}, {"t_s": 45}]
+    write_recording(scenario_dir, track, "not-this-code")
+
+    manifest = checkpoints.load_manifest(scenario_dir, track)
+
+    assert not manifest.has(0)
+    assert not manifest.complete
+
+
+# -- one recorder at a time -----------------------------------------------
+
+
+def test_a_live_recorder_blocks_a_second_one(tmp_path):
+    lock = checkpoints._acquire_lock(tmp_path)
+
+    assert lock is not None
+    assert checkpoints.is_recording(tmp_path)
+    assert checkpoints._acquire_lock(tmp_path) is None, "two recorders would race"
+
+
+def test_a_dead_recorders_lock_is_taken_over(tmp_path):
+    """A recorder killed mid-run must not block the next one for ever."""
+    lock = checkpoints._acquire_lock(tmp_path)
+    long_ago = time.time() - checkpoints.LOCK_STALE_S - 60
+    os.utime(lock, (long_ago, long_ago))
+
+    assert not checkpoints.is_recording(tmp_path)
+    assert checkpoints._acquire_lock(tmp_path) is not None
+
+
+def test_save_leaves_no_partial_file_behind(tmp_path, shared):
+    """The file is renamed into place, so the server never restores half a pickle."""
+    checkpoints.save(make_sim(shared), tmp_path / "beat-00.pkl")
+
+    assert (tmp_path / "beat-00.pkl").exists()
+    assert not list(tmp_path.glob("*.partial"))
