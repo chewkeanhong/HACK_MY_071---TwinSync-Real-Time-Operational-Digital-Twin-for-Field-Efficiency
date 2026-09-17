@@ -1,0 +1,45 @@
+# Build-time dependencies: fetching data, training models, running the suite.
+#
+#     pip install -r requirements.txt -r requirements-dev.txt
+#
+# None of these are needed to run the demo. They are needed to regenerate what is
+# already committed: the DEM grid, the ONNX artifacts, the LightGBM booster and
+# the explainability plots.
+
+-r requirements.txt
+
+# -- data pipeline
+scipy>=1.11             # cKDTree, used by scripts/impute_heights.py
+requests>=2.31          # Overpass fetch in scripts/fetch_osm.py
+
+# -- DEM ingest (scripts/fetch_dem.py)
+#
+# rasterio pulls GDAL and is the one genuinely awkward install here. It is only
+# needed to re-fetch the Copernicus tile; data/terrain.json is committed, and
+# `python scripts/fetch_dem.py --synthetic` needs nothing but numpy.
+rasterio>=1.3
+
+# -- model export (scripts/train_edge_model.py)
+skl2onnx>=1.16
+onnx>=1.15
+
+# -- explainability + plots (scripts/train_risk_model.py)
+#
+# No `shap` package: LightGBM's Booster.predict(pred_contrib=True) already returns
+# exact TreeSHAP values, so the beeswarm in train_risk_model.py is drawn from those
+# directly. Adding shap would install a large dependency to recompute numbers we
+# already have.
+matplotlib>=3.8
+
+# -- benchmarking (scripts/bench_edge.py)
+psutil>=5.9             # process RSS, for the fleet memory figure
+
+# -- tests
+pytest>=8.0
+
+# -- browser smoke test (scripts/verify_ui.py)
+#
+# Needs a browser binary too:  python -m playwright install chromium
+# Only for verifying the dashboard actually renders and its controls are clickable --
+# the kind of failure the Python suite cannot see.
+playwright>=1.40

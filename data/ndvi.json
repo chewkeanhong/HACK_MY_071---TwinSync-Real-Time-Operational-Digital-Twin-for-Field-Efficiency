@@ -1,0 +1,109 @@
+{
+  "source": "sentinel-2-l2a",
+  "model": "sentinel2-ndvi-v1",
+  "scene_id": "S2B_47NRD_20240323_0_L2A",
+  "sensing_date": "2024-03-23T03:47:18.821000Z",
+  "cloud_cover_pct": 4.7,
+  "platform": "sentinel-2b",
+  "processing_baseline": "05.10",
+  "boa_offset_applied": true,
+  "buffer_m": 120.0,
+  "reducer": "median",
+  "ndvi_to_risk": {
+    "floor": 0.1,
+    "ceiling": 0.7,
+    "form": "clip((ndvi - floor) / (ceiling - floor), 0, 1)"
+  },
+  "per_tower": {
+    "KL-01": {
+      "ndvi": 0.0564,
+      "encroachment_risk": 0.0,
+      "pixels": 450,
+      "clear_pct": 100.0
+    },
+    "KL-02": {
+      "ndvi": 0.0933,
+      "encroachment_risk": 0.0,
+      "pixels": 453,
+      "clear_pct": 100.0
+    },
+    "KL-03": {
+      "ndvi": 0.1091,
+      "encroachment_risk": 0.0151,
+      "pixels": 454,
+      "clear_pct": 100.0
+    },
+    "KL-04": {
+      "ndvi": 0.1069,
+      "encroachment_risk": 0.0115,
+      "pixels": 454,
+      "clear_pct": 100.0
+    },
+    "KL-05": {
+      "ndvi": 0.0679,
+      "encroachment_risk": 0.0,
+      "pixels": 454,
+      "clear_pct": 100.0
+    },
+    "KL-06": {
+      "ndvi": 0.0994,
+      "encroachment_risk": 0.0,
+      "pixels": 454,
+      "clear_pct": 100.0
+    },
+    "KL-07": {
+      "ndvi": 0.1445,
+      "encroachment_risk": 0.0742,
+      "pixels": 453,
+      "clear_pct": 100.0
+    },
+    "KL-08": {
+      "ndvi": 0.1595,
+      "encroachment_risk": 0.0992,
+      "pixels": 454,
+      "clear_pct": 100.0
+    },
+    "KL-09": {
+      "ndvi": 0.0862,
+      "encroachment_risk": 0.0,
+      "pixels": 454,
+      "clear_pct": 100.0
+    },
+    "KL-10": {
+      "ndvi": 0.0462,
+      "encroachment_risk": 0.0,
+      "pixels": 447,
+      "clear_pct": 100.0
+    },
+    "KL-11": {
+      "ndvi": 0.1786,
+      "encroachment_risk": 0.131,
+      "pixels": 454,
+      "clear_pct": 100.0
+    },
+    "KL-12": {
+      "ndvi": 0.2893,
+      "encroachment_risk": 0.3154,
+      "pixels": 453,
+      "clear_pct": 100.0
+    },
+    "KL-13": {
+      "ndvi": 0.3456,
+      "encroachment_risk": 0.4093,
+      "pixels": 451,
+      "clear_pct": 100.0
+    },
+    "KL-14": {
+      "ndvi": 0.2154,
+      "encroachment_risk": 0.1923,
+      "pixels": 455,
+      "clear_pct": 100.0
+    },
+    "KL-15": {
+      "ndvi": 0.2535,
+      "encroachment_risk": 0.2558,
+      "pixels": 453,
+      "clear_pct": 100.0
+    }
+  }
+}

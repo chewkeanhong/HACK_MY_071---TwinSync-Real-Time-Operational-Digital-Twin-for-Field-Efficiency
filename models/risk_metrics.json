@@ -1,0 +1,63 @@
+{
+  "roc_auc": 0.6736,
+  "pr_auc": 0.0546,
+  "brier": 0.022299,
+  "base_rate": 0.02312,
+  "test_rows": 12500,
+  "test_positives": 289,
+  "bayes_ceiling_roc_auc": 0.6872,
+  "bayes_ceiling_pr_auc": 0.0639,
+  "fraction_of_achievable_lift": 0.9274,
+  "calibration_deciles": [
+    {
+      "predicted": 0.01055,
+      "observed": 0.0064,
+      "n": 1250
+    },
+    {
+      "predicted": 0.01205,
+      "observed": 0.0104,
+      "n": 1250
+    },
+    {
+      "predicted": 0.01343,
+      "observed": 0.012,
+      "n": 1250
+    },
+    {
+      "predicted": 0.01495,
+      "observed": 0.0224,
+      "n": 1250
+    },
+    {
+      "predicted": 0.01657,
+      "observed": 0.0176,
+      "n": 1250
+    },
+    {
+      "predicted": 0.01847,
+      "observed": 0.02,
+      "n": 1250
+    },
+    {
+      "predicted": 0.02112,
+      "observed": 0.0168,
+      "n": 1250
+    },
+    {
+      "predicted": 0.02529,
+      "observed": 0.0232,
+      "n": 1250
+    },
+    {
+      "predicted": 0.03334,
+      "observed": 0.032,
+      "n": 1250
+    },
+    {
+      "predicted": 0.06139,
+      "observed": 0.0704,
+      "n": 1250
+    }
+  ]
+}

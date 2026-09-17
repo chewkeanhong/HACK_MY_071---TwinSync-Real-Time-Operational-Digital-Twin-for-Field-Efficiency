@@ -12,8 +12,22 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass, field
+from hashlib import blake2b
 
 import numpy as np
+
+
+def stable_seed(text: str) -> int:
+    """A per-string seed that survives a process restart.
+
+    ``hash()`` on a str is salted per interpreter process (PYTHONHASHSEED), so seeding
+    an RNG from it produces a *different* stream on every run. That silently broke the
+    one property this module's docstring promises -- identical data for a given seed --
+    and it showed up as the headless A/B reporting 3 truck rolls on one run and 4 on the
+    next from the same scenario file. A cryptographic digest is stable across processes,
+    machines and Python versions.
+    """
+    return int.from_bytes(blake2b(text.encode("utf-8"), digest_size=4).digest(), "big")
 
 # Healthy operating point and per-sample noise for each metric.
 BASELINE = {
@@ -92,15 +106,20 @@ class TowerTelemetry:
         self.tower_id = tower_id
         # Each site gets its own stable baseline offset, so "normal" differs per tower
         # and a global threshold would not work -- which is why the detector learns.
-        site_rng = np.random.default_rng(abs(hash(tower_id)) % (2**32))
+        site_rng = np.random.default_rng(stable_seed(tower_id))
         self._offsets = {
             metric: float(site_rng.normal(0.0, spread * 1.5))
             for metric, (_, spread) in BASELINE.items()
         }
         self.rng = np.random.default_rng(seed)
 
-    def sample(self, t: float, fault: Fault | None = None) -> dict:
-        """One telemetry reading at simulation time ``t`` (seconds)."""
+    def sample(self, t: float, fault: Fault | None = None,
+               weather: dict | None = None) -> dict:
+        """One telemetry reading at simulation time ``t`` (seconds).
+
+        ``weather`` carries the environmental effects for this site at this instant --
+        see :meth:`_apply_weather` for what each term does and why.
+        """
         values = {}
         # A slow diurnal swing so the baseline is not perfectly stationary.
         diurnal = math.sin(t / 900.0)
@@ -112,6 +131,9 @@ class TowerTelemetry:
             elif metric == "throughput_mbps":
                 value += 25.0 * diurnal
             values[metric] = value
+
+        if weather:
+            self._apply_weather(values, weather)
 
         severity = fault.severity_at(t) if fault else 0.0
         if severity > 0.0:
@@ -129,6 +151,35 @@ class TowerTelemetry:
         values["tower_id"] = self.tower_id
         values["t"] = round(t, 2)
         return values
+
+    @staticmethod
+    def _apply_weather(values: dict, weather: dict) -> None:
+        """Fold environmental conditions into the metrics they physically affect.
+
+        Three effects, each applied to the metric it actually touches:
+
+        * **Backhaul capacity.** ``backhaul_capacity`` arrives already computed from the
+          ITU-R P.838 rain-fade integral along the hop (see twinsync/weather.py) and
+          scales throughput directly. Note what is *not* here: no rain penalty on
+          ``rssi_dbm``. Specific attenuation at the 2.1 GHz access carrier is around
+          0.0001 dB/km even in torrential rain, so applying one would be inventing an
+          effect. Monsoon takes out backhaul, and that is where it is modelled.
+        * **Cooling.** Saturated air carries heat away less effectively, so cabinet
+          temperature drifts up with humidity. Partially offset by rain cooling the
+          enclosure itself, which is why the coefficients are small and opposed.
+        * **Water ingress.** Sustained rain raises VSWR slightly as moisture works into
+          connectors and the feeder run. Small, cumulative in reality, transient here.
+        """
+        capacity = float(weather.get("backhaul_capacity", 1.0))
+        if capacity < 1.0:
+            values["throughput_mbps"] *= capacity
+            # Congested-then-starved backhaul shows up as loss, not just lower rate.
+            values["packet_loss_pct"] += 6.0 * (1.0 - capacity) ** 2
+
+        humidity = float(weather.get("humidity_pct", 78.0))
+        rain = float(weather.get("rainfall_mm_hr", 0.0))
+        values["temperature_c"] += 0.05 * (humidity - 78.0) - 0.015 * rain
+        values["vswr"] += 0.0012 * rain
 
     def digest(self, sample: dict) -> dict:
         """The compact summary the edge uplinks periodically for the dashboard.

@@ -94,12 +94,23 @@ button.on { color: var(--bg); background: var(--ink); border-color: var(--ink); 
 
 /* -------------------------------------------------------------------- KPIs */
 
+/* Centred by spanning the viewport and centring the flex line, NOT by
+   `left:50% + translateX(-50%)`. That older pattern leaves the box only 50vw wide, so
+   `max-width` never bites: at six tiles the row silently wrapped to two lines, grew to
+   158px tall, and swallowed the chaos panel underneath it -- the buttons were still
+   painted but the KPI section was eating every click. */
 .kpis {
-  position: fixed; top: 70px; left: 50%; transform: translateX(-50%);
+  position: fixed; top: 70px; left: 0; right: 0;
   display: flex; gap: 10px; z-index: 9;
+  flex-wrap: wrap; justify-content: center;
+  padding: 0 14px;
+  /* The container spans the screen, so it must not intercept pointer events; only the
+     tiles themselves should. */
+  pointer-events: none;
 }
 .kpi {
-  min-width: 152px;
+  pointer-events: auto;
+  min-width: 140px;
   display: flex; flex-direction: column; gap: 2px;
   padding: 9px 14px;
   background: var(--surface); backdrop-filter: blur(9px);
@@ -114,6 +125,19 @@ button.on { color: var(--bg); background: var(--ink); border-color: var(--ink); 
   line-height: 1.05;
 }
 .k-note { font-size: 10px; color: var(--ink-3); }
+
+/* The ROI tile is the one KPI you can argue with, so it is the one you can click:
+   cycling the assumed fleet size on screen beats asserting a number on a slide. */
+.kpi-click { cursor: pointer; }
+.kpi-click:hover { border-color: rgba(120, 140, 180, 0.42); }
+.kpi.roi .k-value { color: var(--good); }
+/* MTTD is a win, not an alarm, so it reads green like the ROI tile.
+   No min-width override here on purpose: this is the eighth tile, and verify_ui.py
+   fails the run if the row wraps to two lines and covers the chaos panel. The note is
+   kept short enough to sit inside the shared 140px floor, and `nowrap` guarantees it
+   never wraps the comparison across two lines and grows the row instead. */
+.kpi.mttd .k-value { color: var(--good); }
+#kpi-mttd-note { white-space: nowrap; }
 /* Status only ever lands on the number, and the note says why in words. */
 .kpi.alert .k-value { color: var(--crit); }
 .kpi.warn  .k-value { color: var(--warn); }
@@ -224,8 +248,13 @@ button.on { color: var(--bg); background: var(--ink); border-color: var(--ink); 
   border: 1px solid var(--border); border-radius: 9px;
 }
 
-/* Side by side: one caption per pane, each over its own half. */
-body.mode-split .sl { width: 44%; }
+/* Side by side: one caption per pane, each over its own half.
+
+   Dropped clear of the chaos panel, which is also pinned at 148px and centred: at
+   44% per side the two captions reach well past the middle of the screen, so at the
+   same height the inject bar lands on top of the 2D card -- in Compare, which is the
+   one view that ends up on a slide. */
+body.mode-split .sl { width: 44%; top: 206px; }
 body.mode-split .sl-left  { left: 3%; }
 body.mode-split .sl-right { right: 3%; text-align: right; }
 
@@ -270,5 +299,166 @@ body.mode-2d .sl-left { left: 14px; right: auto; width: 306px; text-align: left;
   border: 1px solid var(--border); border-radius: 20px;
 }
 
-/* In split mode the side panels would sit on top of the panes; tuck them down. */
-body.split .panel { max-height: 30vh; }
+/* In split mode the side panels would sit on top of the panes; tuck them down.
+   The selector has to match what setViewMode() actually sets, which is `mode-split` --
+   this rule was written as `body.split` and so never applied at all. */
+body.mode-split .panel { max-height: 30vh; }
+
+/* ------------------------------------------------------------ chaos panel */
+
+/* Same full-width centring as .kpis, and for the same reason. Sits just under the KPI
+   row, which is fixed at 70px and about 68px tall on one line. */
+.chaos {
+  position: fixed; top: 148px; left: 0; right: 0;
+  z-index: 10; display: flex; align-items: center; justify-content: center;
+  gap: 10px; pointer-events: none;
+}
+
+.chaos > * { pointer-events: auto; }
+
+.chaos-inner {
+  display: flex; align-items: center; gap: 10px;
+  padding: 7px 12px; border-radius: 22px;
+  background: var(--surface); border: 1px solid var(--border);
+  backdrop-filter: blur(9px); font-size: 12px;
+  pointer-events: auto;
+}
+
+.chaos-label {
+  text-transform: uppercase; letter-spacing: 0.12em;
+  font-size: 10px; opacity: 0.55;
+}
+
+.chaos-fault { display: flex; align-items: center; gap: 6px; }
+
+.chaos select {
+  background: rgba(10, 14, 24, 0.85); color: var(--ink);
+  border: 1px solid var(--border); border-radius: 6px;
+  padding: 4px 6px; font-size: 11px; font-family: inherit;
+  max-width: 190px;
+}
+
+.chaos-btn {
+  border: 1px solid var(--border); border-radius: 7px;
+  padding: 5px 11px; font-size: 11.5px; font-family: inherit;
+  color: var(--ink); background: rgba(255, 255, 255, 0.05);
+  cursor: pointer; transition: background 0.15s, border-color 0.15s;
+}
+.chaos-btn:hover { background: rgba(255, 255, 255, 0.12); }
+.chaos-btn.storm:hover { border-color: #6096dc; }
+.chaos-btn.fault:hover { border-color: var(--crit); }
+
+.chaos-status { font-size: 11px; color: var(--good); min-width: 140px; }
+.chaos-status.bad { color: var(--crit); }
+
+.chaos-flood {
+  display: flex; align-items: center; gap: 6px;
+  font-size: 11px; opacity: 0.85;
+}
+.chaos-flood input[type="range"] { width: 96px; accent-color: #46becf; }
+.chaos-flood span { font-variant-numeric: tabular-nums; min-width: 46px; }
+
+/* The transport strip sits under the inject row rather than inside it: it is a readout,
+   not a control, and mixing the two made the panel read as one long toolbar. */
+.chaos { flex-direction: column; }
+.cascade-strip { margin-top: 6px; }
+
+.cascade-note {
+  font-size: 11px; color: var(--good);
+  font-variant-numeric: tabular-nums;
+}
+.cascade-note.bad { color: var(--warn); }
+
+/* Speed slider sits in the header controls. */
+.speed { display: flex; align-items: center; gap: 6px; font-size: 11px; opacity: 0.85; }
+.speed input { width: 84px; accent-color: #58a6ff; cursor: pointer; }
+.speed span { min-width: 26px; text-align: right; font-variant-numeric: tabular-nums; }
+
+@media (max-width: 1100px) {
+  .chaos-inner { flex-wrap: wrap; max-width: 92vw; justify-content: center; }
+  .chaos select { max-width: 130px; }
+}
+
+/* ------------------------------------------------------- guided demo track */
+
+/* Sits in the free strip between the two side panels (306px + 14px margin each), so it
+   can never cover the incident queue or the log. Same full-width-and-centre discipline
+   as .kpis: the container spans, the card inside it takes the pointer events. */
+.tour {
+  position: fixed; bottom: 44px; left: 334px; right: 334px;
+  display: flex; justify-content: center;
+  z-index: 11; pointer-events: none;
+}
+.tour[hidden] { display: none; }
+
+.tour-inner {
+  pointer-events: auto;
+  width: 100%; max-width: 620px;
+  padding: 12px 16px 10px;
+  background: var(--surface); backdrop-filter: blur(9px);
+  border: 1px solid var(--border); border-radius: 11px;
+  box-shadow: 0 10px 34px rgba(0, 0, 0, 0.45);
+}
+
+.tour-head { display: flex; align-items: center; gap: 10px; }
+
+.tour-tag {
+  font-size: 9px; text-transform: uppercase; letter-spacing: 0.16em;
+  color: var(--route);
+  border: 1px solid rgba(88, 166, 255, 0.4); border-radius: 4px; padding: 2px 7px;
+}
+.tour-step {
+  font-family: var(--mono); font-size: 10px; color: var(--ink-3);
+  font-variant-numeric: tabular-nums;
+}
+/* Stepping by hand. Pushed right with the exit button so the tag and counter keep the
+   left edge where the eye lands first. */
+/* Labelled, and tinted with the route blue, because a presenter under lights has to find
+   them without looking for them -- bare chevrons beside `exit` read as decoration. */
+.tour-nav { margin-left: auto; display: flex; gap: 6px; }
+.tour-nav button {
+  display: inline-flex; align-items: center; gap: 5px;
+  padding: 4px 12px; font-size: 11px; font-weight: 600; letter-spacing: 0.04em;
+  color: var(--route);
+  background: rgba(88, 166, 255, 0.10);
+  border-color: rgba(88, 166, 255, 0.45);
+}
+.tour-nav button span { font-size: 16px; line-height: 1; }
+.tour-nav button:hover:not(:disabled) {
+  color: var(--ink); background: rgba(88, 166, 255, 0.24); border-color: var(--route);
+}
+.tour-nav button:disabled {
+  color: var(--ink-3); background: transparent; border-color: var(--border);
+  opacity: 0.5; cursor: default;
+}
+.tour-exit { padding: 3px 9px; font-size: 10px; }
+
+/* Shown only while the presenter holds a beat by hand. Amber, because the caption may no
+   longer describe what is on screen, and that is worth noticing before reading it aloud. */
+.tour-mode {
+  font-family: var(--mono); font-size: 9.5px; letter-spacing: 0.04em;
+  color: var(--warn);
+  border: 1px solid rgba(210, 153, 34, 0.45); border-radius: 4px; padding: 1px 6px;
+  white-space: nowrap;
+}
+.tour-mode[hidden] { display: none; }
+
+.tour h3 {
+  margin: 8px 0 4px; font-size: 16px; font-weight: 600; letter-spacing: 0.01em;
+}
+.tour p { margin: 0; font-size: 12px; line-height: 1.5; color: var(--ink-2); }
+
+/* Progress to the next beat. Reassurance that the track is still advancing during the
+   quiet stretches -- without it a 90-second beat reads as a frozen dashboard. */
+.tour-bar {
+  margin-top: 9px; height: 2px; border-radius: 2px;
+  background: rgba(120, 140, 180, 0.16); overflow: hidden;
+}
+.tour-bar i { display: block; height: 100%; width: 0; background: var(--route); }
+
+/* The split-mode verdict pill would land underneath the card; lift it clear. */
+body.demo-on .sl-verdict { bottom: 200px; }
+
+@media (max-width: 1100px) {
+  .tour { left: 14px; right: 14px; bottom: 38px; }
+}

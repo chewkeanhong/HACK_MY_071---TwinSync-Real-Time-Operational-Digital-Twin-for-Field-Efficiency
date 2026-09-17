@@ -1,0 +1,14 @@
+.git
+.github
+docs
+tests
+scripts
+IMPROVEMENT_PLAN.md
+**/__pycache__
+.pytest_cache
+*.md
+!README.md
+
+# Guided-demo checkpoints: ~127 MB of pickled simulation state, and specific to the code
+# that produced them. COPY data/ would otherwise bake them into every image.
+data/checkpoints

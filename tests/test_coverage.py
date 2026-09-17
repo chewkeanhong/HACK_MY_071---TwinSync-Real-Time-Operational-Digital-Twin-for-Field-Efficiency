@@ -7,7 +7,12 @@ priority, the outage shadow on screen) is downstream of this being correct.
 
 from __future__ import annotations
 
+from pathlib import Path
+
+import pytest
+
 from twinsync.coverage import CoverageEngine
+from twinsync.world import World
 
 from .conftest import make_world
 
@@ -174,3 +179,68 @@ def test_naive_radius_overstates_in_the_other_direction():
     assert {"far", "further"} <= naive         # ...including the two in the shadow
     assert {"far", "further"} & real == set()  # which never had service to lose
     assert len(naive) > len(real)
+
+
+# ---------------------------------------------------------------- the real scene
+
+
+@pytest.fixture(scope="module")
+def kl_coverage():
+    """The committed KL CBD scene, computed once for the whole module.
+
+    Uses the on-disk cache when its fingerprint matches; otherwise recomputes, which
+    takes about 25 s. That is worth paying once to keep the pitch's headline number
+    honest.
+    """
+    data = Path(__file__).resolve().parents[1] / "data"
+    if not (data / "towers.geojson").exists():
+        pytest.skip("no committed scene")
+
+    world = World.load(data, require_towers=True)
+    engine = CoverageEngine(world)
+    if not engine.load(data / "coverage_cache.json"):
+        engine.compute(verbose=False)
+    return engine
+
+
+SCENARIO_FAULTS = {"KL-03", "KL-13", "KL-09", "KL-06"}
+
+
+def test_headline_number_on_the_real_scene(kl_coverage):
+    """The figure the pitch is built on, pinned to the committed data.
+
+    README quotes these directly. If a change to the DEM, the Fresnel criterion or the
+    height imputation moves them, this fails and the README has to be updated with it --
+    which is the entire point. Do not widen the tolerance to make a red test green.
+    """
+    dark_3d = kl_coverage.outage(SCENARIO_FAULTS)
+    dark_2d = kl_coverage.outage_2d(SCENARIO_FAULTS)
+
+    assert len(dark_3d) == 47
+    assert kl_coverage.subscribers_affected(dark_3d) == 9026
+    assert len(dark_2d) == 3
+    assert kl_coverage.subscribers_affected(dark_2d) == 3
+
+    # The claim in one line: the flat map misses almost all of them.
+    assert kl_coverage.subscribers_affected(dark_3d) - \
+           kl_coverage.subscribers_affected(dark_2d) == 9023
+
+
+def test_naive_circle_count_is_the_strawman_we_do_not_quote(kl_coverage):
+    """Also pinned, because the README explicitly promises *not* to use this number."""
+    assert len(kl_coverage.naive_radius(SCENARIO_FAULTS)) == 1054
+
+
+def test_every_scenario_tower_is_worse_in_3d_than_a_flat_model_thinks(kl_coverage):
+    """Direction matters more than the exact count: 2D must never overstate the outage."""
+    for tower_id in sorted(SCENARIO_FAULTS):
+        failed = {tower_id}
+        assert (kl_coverage.subscribers_affected(kl_coverage.outage(failed))
+                >= kl_coverage.subscribers_affected(kl_coverage.outage_2d(failed))), \
+            f"{tower_id}: the flat model claimed more outage than 3D found"
+
+
+def test_terrain_backing_the_scene_is_real_copernicus_data(kl_coverage):
+    """Guards the GeoAI claim at its source."""
+    assert kl_coverage.world.terrain.meta.source == "copernicus-glo30"
+    assert kl_coverage.world.towers[0].antenna_z > kl_coverage.world.towers[0].antenna_height

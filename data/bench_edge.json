@@ -1,0 +1,64 @@
+{
+  "measured_at": "2026-08-29T11:41:35+0800",
+  "platform": {
+    "processor": "AMD64 Family 25 Model 97 Stepping 2, AuthenticAMD",
+    "system": "Windows 11",
+    "python": "3.14.4",
+    "onnxruntime": "1.29.0",
+    "scikit_learn": "1.8.0"
+  },
+  "stages": {
+    "ewma_z": {
+      "p50_us": 1.8,
+      "p95_us": 1.9,
+      "p99_us": 2.3,
+      "mean_us": 1.85,
+      "n": 5000
+    },
+    "mahalanobis": {
+      "p50_us": 2.6,
+      "p95_us": 2.7,
+      "p99_us": 2.7,
+      "mean_us": 2.63,
+      "n": 5000
+    },
+    "onnx_fp32": {
+      "p50_us": 14.4,
+      "p95_us": 15.3,
+      "p99_us": 22.7,
+      "mean_us": 14.83,
+      "n": 5000
+    },
+    "isolation_forest": {
+      "p50_us": 1894.3,
+      "p95_us": 1934.6,
+      "p99_us": 2161.7,
+      "mean_us": 1905.63,
+      "n": 1000
+    },
+    "full_observe": {
+      "p50_us": 11.8,
+      "p95_us": 29.5,
+      "p99_us": 31.6,
+      "mean_us": 12.83,
+      "n": 5000
+    }
+  },
+  "memory": {
+    "model_bytes": 3052,
+    "fleet_size": 15,
+    "fleet_rss_bytes": 1228800,
+    "fleet_traced_peak_bytes": 366087,
+    "rss_per_tower_bytes": 81920
+  },
+  "headroom": {
+    "target_hz": 10.0,
+    "fleet_size": 15,
+    "fast_path_p95_us": 4.6,
+    "confirm_p95_us": 15.3,
+    "confirm_period": 20,
+    "amortised_per_sample_us": 5.36,
+    "fleet_cpu_fraction": 0.0008,
+    "confirm_vs_fast_ratio": 3.3
+  }
+}

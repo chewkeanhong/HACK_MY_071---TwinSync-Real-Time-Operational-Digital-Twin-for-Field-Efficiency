@@ -1,0 +1,11 @@
+# docker compose up   →   http://localhost:8000
+#
+# One service, no volumes, no database. See the "Prototype infrastructure" note in the
+# README for what a production deployment would add and why none of it is here yet.
+services:
+  twinsync:
+    build: .
+    image: twinsync:0.1
+    ports:
+      - "8000:8000"
+    restart: unless-stopped
