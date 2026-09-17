@@ -42,8 +42,14 @@ python -m uvicorn twinsync.server:app --port 8000
 ```
 
 Then press **`D`** for the guided demo: it restarts the scenario and narrates the whole
-cascade itself, so nothing depends on remembering the script. See
-[DEMO_SCRIPT.md](DEMO_SCRIPT.md) for the beat-by-beat.
+cascade itself, so nothing depends on remembering the script. The `‹ Prev` / `Next ›`
+buttons on the caption card — or **← / →** and **PageUp / PageDown**, so a presentation
+clicker works — jump the scenario clock to that beat, screen and all. That needs
+`python scripts/bake_checkpoints.py` to have been run once (~8 min), so it works on the
+local run rather than in the container: the recordings are ~127 MB of pickled state tied
+to the code that produced them, deliberately kept out of both git and the image. Without
+them the demo still plays start to finish and the buttons simply say why they are
+disabled. See [DEMO_SCRIPT.md](DEMO_SCRIPT.md) for the beat-by-beat.
 
 **Runs entirely offline.** No map tiles, no CDN, no API keys — deck.gl is vendored, the
 roads are drawn from our own GeoJSON, the DEM grid, the Sentinel-2 NDVI bake and both
@@ -51,7 +57,7 @@ model artifacts are committed. Conference wifi cannot break this demo.
 
 ```bash
 python -m twinsync.sim --scenario data/scenario.json --seed 42   # headless, both arms
-pytest tests/ -q                                                 # 212 tests
+pytest tests/ -q                                                 # 222 tests
 python scripts/verify_ui.py http://127.0.0.1:8000 shots/         # real browser
 ```
 
@@ -435,6 +441,7 @@ delta.
 | `twinsync/weather.py` | drifting storm cells, ITU-R P.838 rain fade, flooding |
 | `twinsync/metrics.py` | MTTD/MTTL/MTTR, truck rolls, fuel, CO₂, SLA uptime, ROI projection |
 | `twinsync/sim.py` | headless simulation, both arms |
+| `twinsync/checkpoints.py` | recorded simulation states, so the demo can jump between beats |
 | `edge/detector.py` | three detectors on two cadences, ONNX confirmation stage |
 | `edge/intelligence.py` | adapter over the localiser and the risk scorer |
 | `scripts/` | data pipeline, model training, benchmarks, browser smoke test |

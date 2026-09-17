@@ -11,7 +11,6 @@ Three behaviours here are the efficiency story:
 
 from __future__ import annotations
 
-import itertools
 from dataclasses import dataclass, field
 
 import numpy as np
@@ -133,7 +132,10 @@ class DispatchEngine:
         self.log: list[tuple[float, str]] = []
         self._batched = 0
         self._reassignments = 0
-        self._counter = itertools.count(1)
+        # A plain int rather than itertools.count: the guided demo checkpoints the whole
+        # simulation so the presenter can jump between beats, and a count() object cannot
+        # be copied or pickled. Same numbering, one attribute that survives a round trip.
+        self._counter = 0
         # Unassignable incidents are retried on a timer; without this they would repeat
         # the same "no crew available" line every retry and bury the real timeline.
         self._deferred: set[str] = set()
@@ -149,6 +151,10 @@ class DispatchEngine:
             return
         self._deferred.add(incident_id)
         self._note(now, message)
+
+    def _next_id(self) -> int:
+        self._counter += 1
+        return self._counter
 
     def crew(self, crew_id: str) -> Crew:
         return next(c for c in self.crews if c.id == crew_id)
@@ -171,7 +177,7 @@ class DispatchEngine:
     def report(self, now: float, tower_id: str, severity: str, impact: Impact,
                xy: np.ndarray, fault_started_at: float | None = None) -> Incident:
         incident = Incident(
-            id=f"INC-{next(self._counter):03d}",
+            id=f"INC-{self._next_id():03d}",
             tower_id=tower_id,
             severity=severity,
             detected_at=now,

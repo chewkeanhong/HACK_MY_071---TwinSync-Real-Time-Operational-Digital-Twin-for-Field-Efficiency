@@ -569,7 +569,9 @@ function buildLayers() {
 
 /** The viewport layout for the current mode. */
 function currentViews() {
-  const common = {controller: {dragRotate: true, inertia: 320}};
+  // Keyboard navigation is off: the arrow keys step the guided demo's beats, and with it
+  // on, a presenter who had clicked the map would pan the camera and change slide at once.
+  const common = {controller: {dragRotate: true, inertia: 320, keyboard: false}};
   const full = (id) => new MapView({id, x: 0, y: 0, width: '100%', height: '100%',
                                     ...common});
   if (viewMode === '2d') return [full('2d')];
@@ -1143,6 +1145,10 @@ async function boot() {
   if (!demoTrack) {
     $('btn-demo').disabled = true;
     $('btn-demo').title = 'No demo track baked (data/demo.json)';
+  } else {
+    // Whether the presenter can jump between beats depends on a recording that may be
+    // missing or stale. Asked once here so the card can say so, rather than on the press.
+    loadCheckpointState();
   }
 
   loadRoi();
@@ -1322,6 +1328,21 @@ let demoBeat = -1;
  * afterwards. Without this the track would jump to its last beat and snap back. */
 let demoAwaitingReset = false;
 
+/* Stepping between beats moves the *scenario clock*, not just the caption.
+ *
+ * The card is derived from simulated time every frame, so moving the caption alone would
+ * leave it describing a screen that has not got there yet -- reading "47 buildings dark"
+ * over five. Instead the server restores that beat's recorded simulation state, so the
+ * map, the queue, the log and the clock all arrive together, and the run carries on from
+ * there. Replaying to the instant would take minutes, hence the recording; see
+ * `twinsync/checkpoints.py` and `scripts/bake_checkpoints.py`.
+ *
+ * `demoCanSeek` is false when no recording exists or it is stale, which is a setup
+ * mistake worth surfacing on the card rather than a dead button. */
+let demoCanSeek = false;
+let demoSeekReason = 'checking…';
+let demoSeeking = false;
+
 async function startDemo() {
   if (!demoTrack) return;
 
@@ -1341,6 +1362,7 @@ async function startDemo() {
   demoOn = true;
   demoBeat = -1;
   demoAwaitingReset = true;
+  demoSeeking = false;
   document.body.classList.add('demo-on');
   $('tour').hidden = false;
   $('btn-demo').classList.add('on');
@@ -1349,6 +1371,7 @@ async function startDemo() {
 function stopDemo() {
   demoOn = false;
   demoAwaitingReset = false;
+  demoSeeking = false;
   document.body.classList.remove('demo-on');
   $('tour').hidden = true;
   $('btn-demo').classList.remove('on');
@@ -1370,6 +1393,87 @@ function applyBeat(index) {
   }
 }
 
+/** The beat the scenario is actually on: the latest one whose time has come. */
+function liveBeat() {
+  const beats = demoTrack.beats;
+  let active = 0;
+  for (let i = 0; i < beats.length; i++) {
+    if (state.t >= beats[i].t_s) active = i;
+  }
+  return active;
+}
+
+/** Move the scenario to another beat: its recorded state, its clock, its screen. */
+async function stepDemo(delta) {
+  // Mid-reset the clock still belongs to the previous run, so `demoBeat` is not yet
+  // meaningful; and two seeks at once would race each other's restore.
+  if (!demoOn || !demoTrack || !state || demoAwaitingReset || demoSeeking) return;
+  if (!demoCanSeek) return;
+  const last = demoTrack.beats.length - 1;
+  const target = Math.max(0, Math.min(last, demoBeat + delta));
+  if (target === demoBeat) return;
+
+  demoSeeking = true;
+  renderDemoNav();
+  try {
+    const response = await fetch(`/api/demo/seek/${target}`, {method: 'POST'});
+    const body = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      demoCanSeek = false;
+      demoSeekReason = body.error || `seek failed (${response.status})`;
+      return;
+    }
+    // The clock has moved, so anything accumulated for the old instant is wrong: crew
+    // trails would streak across the city, and the log would read as one continuous run.
+    $('log').innerHTML = '';
+    logSeen = 0;
+    trails.clear();
+    lastT = body.t;
+    // Paint the beat now rather than waiting for the next frame to derive it.
+    applyBeat(target);
+  } catch (err) {
+    demoCanSeek = false;
+    demoSeekReason = 'seek request failed';
+  } finally {
+    demoSeeking = false;
+    renderDemoNav();
+  }
+}
+
+/** Enable, disable and explain the step buttons. */
+function renderDemoNav() {
+  const last = demoTrack ? demoTrack.beats.length - 1 : 0;
+  const blocked = !demoCanSeek || demoSeeking;
+  $('tour-prev').disabled = blocked || demoBeat <= 0;
+  $('tour-next').disabled = blocked || demoBeat >= last;
+
+  const badge = $('tour-mode');
+  // Only worth saying when something is wrong or in flight; in the normal case the
+  // buttons speak for themselves and the card should stay about the scenario.
+  if (demoSeeking) {
+    badge.hidden = false;
+    badge.textContent = 'jumping…';
+  } else if (!demoCanSeek) {
+    badge.hidden = false;
+    badge.textContent = demoSeekReason;
+  } else {
+    badge.hidden = true;
+  }
+}
+
+/** Ask whether the recorded states exist and match the running code. */
+async function loadCheckpointState() {
+  try {
+    const body = await (await fetch('/api/demo/checkpoints')).json();
+    demoCanSeek = !!body.available;
+    demoSeekReason = body.reason || 'jumping unavailable';
+  } catch (err) {
+    demoCanSeek = false;
+    demoSeekReason = 'jumping unavailable';
+  }
+  if (demoTrack) renderDemoNav();
+}
+
 function updateDemo() {
   if (!demoOn || !demoTrack || !state) return;
 
@@ -1380,20 +1484,25 @@ function updateDemo() {
     demoAwaitingReset = false;
   }
 
-  let active = 0;
-  for (let i = 0; i < beats.length; i++) {
-    if (state.t >= beats[i].t_s) active = i;
-  }
-  if (active !== demoBeat) applyBeat(active);
+  // The clock is the single source of truth for which beat is showing -- stepping moves
+  // the clock, so there is nothing to reconcile here and the card can never describe an
+  // instant the screen is not at. The guard keeps a beat already on screen from re-flying
+  // the camera every frame.
+  const live = liveBeat();
+  if (live !== demoBeat) applyBeat(live);
+  renderDemoNav();
 
-  const from = beats[active].t_s;
-  const to = beats[active + 1] ? beats[active + 1].t_s : from + 120;
+  // Time to the next scripted event.
+  const from = beats[live].t_s;
+  const to = beats[live + 1] ? beats[live + 1].t_s : from + 120;
   const pct = Math.max(0, Math.min(1, (state.t - from) / Math.max(1, to - from)));
   $('tour-progress').style.width = `${(100 * pct).toFixed(1)}%`;
 }
 
 $('btn-demo').addEventListener('click', () => (demoOn ? stopDemo() : startDemo()));
 $('tour-exit').addEventListener('click', stopDemo);
+$('tour-prev').addEventListener('click', () => stepDemo(-1));
+$('tour-next').addEventListener('click', () => stepDemo(1));
 
 /* Mode switching. Also bound to 1/2/3 so the pitch can be driven without hunting
    for a button while talking. */
@@ -1422,6 +1531,16 @@ window.addEventListener('keydown', (e) => {
     applyFlood(Number(slider.value) / 10);
   }
   else if (e.key === 'Escape' && demoOn) stopDemo();
+  // Beat stepping. PageUp/PageDown is what presentation clickers send, so a real clicker
+  // drives the captions; the arrows are for a presenter at the keyboard.
+  else if (demoOn && (e.key === 'ArrowRight' || e.key === 'PageDown')) {
+    e.preventDefault();
+    stepDemo(1);
+  }
+  else if (demoOn && (e.key === 'ArrowLeft' || e.key === 'PageUp')) {
+    e.preventDefault();
+    stepDemo(-1);
+  }
 });
 
 boot();

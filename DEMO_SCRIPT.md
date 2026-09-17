@@ -6,9 +6,15 @@ what to say instead if it does not.
 **Before you start**
 
 ```bash
+python scripts/bake_checkpoints.py                    # once, ~5 min: lets Prev/Next jump
 python -m uvicorn twinsync.server:app --port 8000     # or: docker compose up
 python scripts/verify_ui.py http://127.0.0.1:8000 shots/
 ```
+
+The first command records the scripted run so the caption card's `‹ Prev` / `Next ›`
+buttons can move the scenario clock between beats. Skip it and the demo still runs
+start to finish — you just cannot jump. Re-run it after editing `data/scenario.json` or
+the simulation code.
 
 The second command is not optional before a rehearsal. This dashboard fails *silently* —
 a blank WebGL canvas with a clean console and a HUD that looks perfectly healthy — and
@@ -96,6 +102,28 @@ fuel-and-rolls saving on this scenario is nil and the win is entirely restored s
 The README sets the trade out in full. Conceding that unprompted buys more credibility
 than a number they can't check.
 
+**Driving it by hand.** The `‹ Prev` / `Next ›` buttons on the caption card jump the
+**scenario clock** to that beat — or use **→ / PageDown** and **← / PageUp**, which is
+what a presentation clicker sends.
+
+This is a real jump, not just a caption change: the map, the incident queue, the log and
+the clock all land on that beat together, so the number on the card is the number on
+screen. Press Next on beat 11 and the clock moves to t=1200 s with four sites dark and
+9,026 subscribers off the air. Press Prev and it goes back to t=1155 s. Each jump takes
+about a second, and the run **carries on from there** at the demo's 8× speed.
+
+Use it to skip ahead when you are short of time, or to go back and re-explain a beat you
+rushed. Jumping discards anything you injected off-script from the chaos panel — it
+restores the scripted scenario, which is the point.
+
+⚠ **This needs `python scripts/bake_checkpoints.py` to have been run** (see *Before you
+start*). Without it the buttons are disabled and the card says why. Re-run it after
+changing `data/scenario.json` or the simulation — the server checks and refuses stale
+recordings rather than jumping into a scenario that no longer exists.
+
+⚠ **Clicker warning.** Many clickers' "blank screen" button sends `b` — which on this
+dashboard is **Power cut**, and injects a real outage into the run. Do not press it.
+
 **The chaos panel.** Two clicks prove the clustering is real rather than a label
 generator:
 
@@ -167,11 +195,12 @@ other real win is backhaul, down 98.5%.
 | symptom | what to do | what to say |
 |---|---|---|
 | 3D scene is blank | reload the page once | "Let me reload — WebGL sometimes loses the context on a projector." |
-| captions stop advancing | press `D` twice to restart the track | keep talking; the scenario is still running underneath |
+| captions stop advancing | press `→` to step to the next beat; if that does nothing, `D` twice restarts the track | keep talking; the scenario is still running underneath |
 | the socket drops | it reconnects itself in 1.5 s | "That's the twin reconnecting — the server owns the clock, so nothing is lost." |
 | the storm does not appear | press `S` | "Let me force one rather than wait for the script." |
 | no cyan roads by beat 10 | press `W` and drag the flood slider | "Let me put the water up by hand so you can see the reroute." |
 | ROI or MTTD tile reads "—" | `data/results.json` is missing; keep going | "That tile is the offline A/B run; the live numbers are all still here." |
+| `‹ Prev` / `Next ›` greyed out | the card says why — almost always `scripts/bake_checkpoints.py` was not run, or the scenario changed since it was. Narrate straight through instead | nothing; the demo runs start to finish without them |
 | you are running short | press `3` for Compare and read the verdict bar | the gap is the argument; you do not need the rest |
 
 The dashboard needs no network at all — deck.gl is vendored, the roads are our own

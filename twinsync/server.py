@@ -25,6 +25,7 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
+from . import checkpoints
 from .routing import DRY, RoadNetwork
 from .sim import Simulation, load_all
 
@@ -133,6 +134,26 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="TwinSync", lifespan=lifespan)
+
+
+@app.middleware("http")
+async def always_revalidate(request, call_next):
+    """Make the browser check with the server before reusing anything it has cached.
+
+    With no Cache-Control header a browser guesses how long a response stays fresh from
+    its Last-Modified date -- and a file that sat unchanged for days is judged fresh for
+    hours. So after editing the dashboard, a normal reload served the *old* app.js from
+    cache without asking: the guided demo's new step buttons were on disk and on the wire,
+    and invisible on screen. On a demo laptop that is a silent failure minutes before
+    presenting.
+
+    `no-cache` does not disable caching. The browser still keeps its copy; it just asks
+    first, and an unchanged file comes back as a cheap 304 -- including the vendored
+    deck.gl bundle -- so an unmodified dashboard loads as fast as before.
+    """
+    response = await call_next(request)
+    response.headers.setdefault("Cache-Control", "no-cache")
+    return response
 
 
 @app.get("/api/world")
@@ -457,6 +478,17 @@ async def get_terrain():
     return FileResponse(path, media_type="application/json")
 
 
+def _demo_beats() -> list[dict]:
+    """The beat track, or an empty list if this repo has no demo baked."""
+    path = DATA_DIR / "demo.json"
+    if not path.exists():
+        return []
+    try:
+        return json.loads(path.read_text(encoding="utf-8")).get("beats", [])
+    except (OSError, json.JSONDecodeError):
+        return []
+
+
 @app.get("/api/demo")
 async def get_demo():
     """The guided-demo beat track.
@@ -469,6 +501,60 @@ async def get_demo():
     if not path.exists():
         return JSONResponse({"error": "no demo track"}, status_code=404)
     return FileResponse(path, media_type="application/json")
+
+
+@app.get("/api/demo/checkpoints")
+async def demo_checkpoints():
+    """Which beats the presenter can jump to, and why not if they cannot.
+
+    The client asks once at load so the Prev/Next buttons can say what is wrong instead
+    of failing silently: a missing or stale recording is a five-minute fix with
+    `scripts/bake_checkpoints.py`, but only if somebody is told before they are on stage.
+    """
+    beats = _demo_beats()
+    if not beats:
+        return {"available": False, "reason": "no demo track", "beats": 0}
+    manifest = checkpoints.load_manifest(DATA_DIR, beats)
+    return {"available": manifest.usable, "reason": manifest.reason,
+            "beats": len(manifest.beats) if manifest.usable else 0}
+
+
+@app.post("/api/demo/seek/{index}")
+async def demo_seek(index: int):
+    """Move the scenario clock to a beat, by restoring its recorded state.
+
+    Replaying to the instant would take minutes (~80 ms per 0.2 s step), so the run is
+    recorded ahead of time and this is a read. The restored simulation is identical to
+    having let the demo run there, and it keeps running from that point at whatever speed
+    the clock is set to.
+    """
+    beats = _demo_beats()
+    if not beats:
+        return JSONResponse({"error": "no demo track"}, status_code=404)
+    manifest = checkpoints.load_manifest(DATA_DIR, beats)
+    if not manifest.usable:
+        return JSONResponse({"error": manifest.reason}, status_code=409)
+    if not 0 <= index < len(manifest.beats):
+        return JSONResponse({"error": f"no beat {index}"}, status_code=404)
+
+    async with engine._lock:
+        if engine.sim is None:
+            return JSONResponse({"error": "not ready"}, status_code=503)
+        try:
+            # The live simulation is only read from here, for the world, coverage and
+            # model objects the recording deliberately left out.
+            restored = checkpoints.load(manifest.path_for(index), engine.sim)
+        except Exception as exc:                                  # noqa: BLE001
+            return JSONResponse(
+                {"error": f"could not restore beat {index}: {exc}"}, status_code=500)
+        engine.sim = restored
+        payload = engine.sim.snapshot()
+
+    # Push the new state immediately rather than waiting for the next frame, so the
+    # dashboard repaints on the beat instead of a quarter-second later.
+    await engine.broadcast(payload)
+    return {"ok": True, "beat": index, "t": payload["t"],
+            "paused": engine.paused, "time_scale": engine.time_scale}
 
 
 @app.get("/api/coverage/{tower_id}")

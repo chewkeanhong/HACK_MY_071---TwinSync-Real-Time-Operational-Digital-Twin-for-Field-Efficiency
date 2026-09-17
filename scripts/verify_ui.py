@@ -21,6 +21,7 @@ Exits non-zero on any error, so it can gate a demo rehearsal.
 from __future__ import annotations
 
 import sys
+import time
 from pathlib import Path
 
 from playwright.sync_api import sync_playwright
@@ -466,6 +467,70 @@ def run():
                   + str(page.evaluate("() => demoBeat")))
         except Exception:
             errors.append("guided demo never advanced past its first beat")
+
+        # -- stepping beats moves the scenario clock -------------------------
+        # Prev/Next restore a recorded simulation state, so the map, the queue and the
+        # clock all land on the beat together. The failure this guards is a button that
+        # moves the caption while the screen stays where it was -- which would put a
+        # number in the presenter's mouth that is not on screen.
+        nav = lambda: page.evaluate("""() => ({
+            beat: demoBeat, t: state.t, canSeek: demoCanSeek,
+            badge: document.getElementById('tour-mode').hidden
+                ? null : document.getElementById('tour-mode').textContent,
+        })""")
+        try:
+            page.wait_for_function(
+                "() => demoOn && !demoAwaitingReset && demoBeat >= 0", timeout=45000)
+        except Exception:
+            pass
+        beats = page.evaluate("() => demoTrack.beats")
+        before = nav()
+        if not before["canSeek"]:
+            # A fresh clone has no recording, which is a setup step rather than a bug --
+            # but the card must say so rather than offering a button that does nothing.
+            warnings.append(
+                f"beat jumping unavailable ({before['badge']!r}); run "
+                f"scripts/bake_checkpoints.py to exercise it")
+        elif before["beat"] >= len(beats) - 1:
+            warnings.append("the demo was already on its last beat; jumping was not "
+                            "exercised this run")
+        else:
+            b0 = before["beat"]
+            page.click("#tour-next", timeout=5000)
+            try:
+                page.wait_for_function("b => demoBeat === b && !demoSeeking",
+                                       arg=b0 + 1, timeout=30000)
+            except Exception:
+                errors.append(f"Next did not reach beat {b0 + 1}: {nav()}")
+            ahead = nav()
+            print("  jumped forward:", ahead)
+            # The clock itself must have moved to that beat, not just the caption.
+            want = beats[b0 + 1]["t_s"]
+            if not (want - 1 <= ahead["t"] <= want + 60):
+                errors.append(f"Next moved the caption to beat {b0 + 1} but the clock "
+                              f"reads {ahead['t']:.0f}s, not ~{want}s -- the screen and "
+                              f"the caption disagree")
+
+            # And back: a jump backwards is the one a replay could not do cheaply.
+            page.keyboard.press("ArrowLeft")
+            try:
+                page.wait_for_function("b => demoBeat === b && !demoSeeking",
+                                       arg=b0, timeout=30000)
+            except Exception:
+                errors.append(f"Previous did not return to beat {b0}: {nav()}")
+            back = nav()
+            print("  jumped back:", back)
+            want_back = beats[b0]["t_s"]
+            if not (want_back - 1 <= back["t"] <= want_back + 60):
+                errors.append(f"Previous left the clock at {back['t']:.0f}s rather than "
+                              f"~{want_back}s")
+            if back["t"] >= ahead["t"]:
+                errors.append("the scenario clock did not move backwards on Previous")
+            # The clock keeps running after a jump; it must not land paused.
+            t_after = page.evaluate("() => state.t")
+            page.wait_for_timeout(1500)
+            if page.evaluate("() => state.t") <= t_after:
+                errors.append("the scenario clock stopped after a jump")
         # The guided demo restarts the run, and a frame posted just before the reset
         # landed used to repaint the log and carry `logSeen` up to the *old* run's event
         # count -- after which every event of the new run has a lower id and is dropped.
