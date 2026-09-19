@@ -199,7 +199,12 @@ class RiskScorer:
         except ImportError:
             return cls()
 
-        booster = lgb.Booster(model_file=str(path))
+        # Load from a string rather than model_file: a Windows checkout with
+        # core.autocrlf=true rewrites the artifact to CRLF, and LightGBM's parser then
+        # fails every tree with "Model format error, expect a tree here". Normalising
+        # the line endings here makes the loader indifferent to how git delivered it.
+        # read_text() in universal-newlines mode already folds CRLF to LF.
+        booster = lgb.Booster(model_str=path.read_text(encoding="utf-8"))
         meta_path = models_dir / META_FILE
         meta = (json.loads(meta_path.read_text(encoding="utf-8"))
                 if meta_path.exists() else {})
