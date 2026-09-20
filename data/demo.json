@@ -22,9 +22,9 @@
     {
       "t_s": 185,
       "tag": "act 1",
-      "title": "A rooftop amplifier starts cooking",
-      "body": "KL-03. EWMA and Mahalanobis flag it at full rate; the ONNX autoencoder confirms on its duty cycle. Detected 2.8 s after onset — before a single customer has called. The MTTD tile is live from here: 10.0 min reactive against seconds on the edge.",
-      "say": "Act one. The edge caught this in under three seconds — the detection tile is the whole argument in one number.",
+      "title": "A relay's backhaul saturates",
+      "body": "KL-03. EWMA and Mahalanobis flag it at full rate; the ONNX autoencoder confirms on its duty cycle. Detected 3.6 s after onset — before a single customer has called. The MTTD tile is live from here: 10.0 min reactive against seconds on the edge. KL-03 is a relay: KL-10, KL-12 and KL-13 all reach the network through it.",
+      "say": "Act one. The edge caught this in under four seconds — the detection tile is the whole argument in one number.",
       "view": "3d",
       "focus": "KL-03"
     },
@@ -39,34 +39,34 @@
     {
       "t_s": 335,
       "tag": "act 2",
-      "title": "A second fault, 290 m away",
-      "body": "KL-13, while the crew is still en route to KL-03. ST-DBSCAN groups them in space, time and fault family — 2 sites within 301 m over 153 s, one cluster CL-001, one trip.",
-      "say": "A second site fails nearby. The clustering folds it into the same journey.",
+      "title": "Not a second fault — a chain reaction",
+      "body": "KL-13 alarms 148 s later, 301 m away. It is not a coincidence of geography: KL-03 is KL-13's primary feed, and every packet KL-13 sends transits it. ST-DBSCAN groups them into one incident — CL-001, 2 sites within 301 m over 148 s. Then the asset graph orders the cluster: who feeds whom, and who alarmed first. Both point the same way. SOURCE: KL-03. DOWNSTREAM: KL-13, one hop, on its primary feed. The amber link on the map is the direction the failure travelled.",
+      "say": "A second site alarms. It is not a second fault — it is the first one, arriving downstream. Watch the amber link: that is the direction the failure travelled.",
       "view": "3d",
       "focus": "KL-13"
     },
     {
       "t_s": 430,
       "tag": "act 2",
-      "title": "One truck roll instead of two",
-      "body": "Batching removes the second roll — and makes the second job wait. We report both halves of that: here the p90 improves anyway, 41.6 min to 29.3, because the baseline's ten-minute detection delay costs it more than batching costs us. It also keeps a van free, which matters later: four vans, six faults.",
-      "say": "That saves a truck. It also costs the second job some time, and we report that.",
+      "title": "One truck roll, and the right end of it first",
+      "body": "CREW-C is already en route to KL-03, so KL-13 folds onto the same trip — a 1.7 minute detour instead of a second van. The second job waits, and the p90 still improves, 41.6 min to 29.3, because the baseline's ten-minute detection delay costs it more than the detour costs us. The crew works KL-03 first: KL-13 is downstream of it, so it clears when the head is fixed.",
+      "say": "One van covers both, and it starts at the end of the chain that actually needs fixing.",
       "view": "3d"
     },
     {
       "t_s": 610,
       "tag": "act 3",
       "title": "The monsoon arrives",
-      "body": "ITU-R P.838 rain fade applied to the 18 GHz backhaul — and deliberately not to the 2.1 GHz access carrier, where it would be a fabricated effect an RF engineer would catch.",
-      "say": "Act three. A convective cell drifts across the CBD.",
+      "body": "A convective cell enters from the north-east, 1.6 km across, tracking south-west over the CBD at 16 km/h. Right now it is barely registering — what matters is where it goes. It builds to 5 mm/hr by the next fault, 49 when the roads start going under, and 95 at its peak. ITU-R P.838 rain fade is applied to the 18 GHz backhaul underneath it; the 2.1 GHz access carrier is unaffected at these rates, so nothing drops off the coverage map from weather alone. The weather tile turns amber and starts counting.",
+      "say": "Act three. A storm cell moves in — and it gets worse for the rest of the run.",
       "view": "3d"
     },
     {
       "t_s": 710,
       "tag": "act 3",
       "title": "A third fault — and it is unrelated",
-      "body": "KL-09 is 1,205 m from the first two and a congested backhaul shares no root cause with a bent antenna, so ST-DBSCAN labels it ISOLATED rather than folding it in. A label generator could not make that distinction. It also commits the second of four vans.",
-      "say": "The clustering says this one is on its own. That is a real decision, not a sticker.",
+      "body": "KL-09 is 1,205 m from KL-03 and 1,015 m from KL-13 — both outside the 900 m radius — so ST-DBSCAN labels it ISOLATED rather than folding it into CL-001. Same fault type as KL-03, and it still stays out: matching in kind is not the same as being near. No cluster means no head to name, so the incident card carries no source — this one is its own job. It commits the second of four vans.",
+      "say": "Same fault type as act one, a kilometre away — and the clustering keeps it separate. No cause named here, and a second van goes out.",
       "view": "3d",
       "focus": "KL-09"
     },
@@ -90,8 +90,8 @@
       "t_s": 1155,
       "tag": "act 4",
       "title": "Four sites dark",
-      "body": "KL-06 loses mains and the fourth site goes dark: KL-03, then KL-13, then KL-09, now KL-06. No single one of these did the damage — what matters is the total, and the next beat is the only window in the run where you can see it.",
-      "say": "A fourth site goes dark. Hold that thought and look at the comparison.",
+      "body": "KL-06 loses mains and the fourth site goes dark: KL-03, then KL-13, then KL-09, now KL-06. No single one of these did the damage on its own — what matters is the total across all four.",
+      "say": "A fourth site goes dark. Now look at what the two models say about it.",
       "view": "3d",
       "focus": "KL-06"
     },
@@ -99,7 +99,7 @@
       "t_s": 1200,
       "tag": "the point",
       "title": "What the flat map never saw",
-      "body": "Four sites down. True line of sight says 47 buildings and 9,026 subscribers are off the air; the flat model says 3 buildings and 3 subscribers. It misses 9,023 people — not by raising a false alarm, but by staying quiet. Same scenario, same seed, both dispatch arms: a controlled experiment, not a claim.",
+      "body": "Four sites down. True line of sight says 47 buildings and 9,026 subscribers are off the air; the flat model says 3 buildings and 3 subscribers. It misses 9,023 people — not by raising a false alarm, but by staying quiet. Both arms are running the same scenario on the same seed, side by side.",
       "say": "Nine thousand and twenty-three people the flat map is quietly confident are fine.",
       "view": "split"
     },
@@ -107,8 +107,8 @@
       "t_s": 1270,
       "tag": "act 5",
       "title": "The fourth van goes out",
-      "body": "KL-07 fails: a small fault on a distant site, 909 m from every other faulted tower, so it neither batches onto an in-flight trip nor joins a cluster. Five sites dark now — 49 buildings and 9,700 subscribers against the flat model's 3. It also commits the last van, which is the state the next beat needs.",
-      "say": "A fifth site, and the last crew rolls. The fleet is now fully committed — remember that.",
+      "body": "KL-07 fails: a small fault on a distant site, 909 m from every other faulted tower, so it neither batches onto an in-flight trip nor joins a cluster. Five sites dark now — 49 buildings and 9,700 subscribers against the flat model's 3. It takes the last van, and the fleet is fully committed.",
+      "say": "A fifth site, and the last crew rolls. Every van is now out.",
       "view": "3d",
       "focus": "KL-07"
     },
@@ -116,7 +116,7 @@
       "t_s": 1420,
       "tag": "act 6",
       "title": "The site nobody can ignore",
-      "body": "KL-04 loses power: 42,053 subscribers and two pieces of critical infrastructure behind it, and the incident it raises covers 53,399 subscribers across 134 buildings. Priority is reach × severity × criticality × urgency, and it scores 144.2 against 0.1 to 4.4 for everything already open. All four vans are committed, so this is the one moment the twin overrides a decision it has already made: it pulls CREW-C off KL-03. Note which crew it takes: CREW-C is further away than CREW-D but 8.6 min out against 13.1, so travel time beats distance.",
+      "body": "KL-04 loses power: 42,053 subscribers and two pieces of critical infrastructure behind it, and the incident it raises covers 53,399 subscribers across 134 buildings. Priority is reach × severity × criticality × urgency, and it scores 144.2 against 0.1 to 4.4 for everything already open. All four vans are committed, so this is the one moment the twin overrides a decision it has already made: it pulls CREW-C off KL-03. CREW-C is further away than CREW-D in metres but 8.6 min out against 13.1, so travel time beats distance.",
       "say": "And now the one that changes the shape of the day. Watch a crew get pulled off its job.",
       "view": "3d",
       "focus": "KL-04"

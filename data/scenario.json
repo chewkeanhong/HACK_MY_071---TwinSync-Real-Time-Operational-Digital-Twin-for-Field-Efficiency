@@ -36,15 +36,15 @@
   "faults": [
     {
       "tower": "KL-03",
-      "profile": "amplifier_degradation",
+      "profile": "backhaul_congestion",
       "start_s": 180.0,
-      "note": "Act 1: a rooftop amplifier starts cooking. The edge catches the drift; the 3D shadow shows who really went dark."
+      "note": "Act 1: the backhaul saturates at a relay that feeds three sites -- KL-10, KL-12 and KL-13. The edge catches it in seconds and the 3D shadow shows who really went dark. This is the head of the chain. Deliberately a transport fault rather than a power one: every site downstream of KL-03 transits it, so the fault propagates along the feed, and a power event here would be scored 'down' by the baseline arm and 'degraded' by the edge detector, widening the published A/B gap for a reason that has nothing to do with root-cause attribution."
     },
     {
       "tower": "KL-13",
-      "profile": "antenna_misalignment",
+      "profile": "backhaul_congestion",
       "start_s": 330.0,
-      "note": "Act 2: a second, smaller fault 1.7 minutes' drive from KL-03, while the crew is still en route -- folded into the same trip."
+      "note": "Act 2: not a second fault. KL-13's own equipment is fine. KL-03 is its primary feed, 290 m away, and every packet KL-13 sends transits it; once KL-03's backhaul saturated, KL-13 fell onto its 733 m protect hop to KL-06, which now carries KL-13's traffic on top of its own. 150 s later that hop saturates too. This is the chain reaction the demo exists to show. Note what it is worth and what it is not: the batcher already saves the second truck roll on distance alone, so the claim here is the repair order -- fix KL-03 and KL-13 clears, start at KL-13 and you repair a site that was never broken."
     },
     {
       "tower": "KL-09",

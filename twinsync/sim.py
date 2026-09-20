@@ -20,6 +20,7 @@ import numpy as np
 from edge.detector import EdgeDetector
 from edge.intelligence import IntelligenceLayer
 from edge.telemetry import Fault, TowerTelemetry
+from twinsync.rootcause import ROLE_SOLE
 
 from .coverage import CoverageEngine
 from .dispatch import Crew, DispatchEngine
@@ -118,6 +119,12 @@ class Simulation:
         self._last_cascade_check = -1e9
 
         self._incident_by_tower: dict[str, str] = {}
+        # When each open alarm fired, and what profile it carried. The clusterer holds
+        # its own copy of these as space-time points; root-cause attribution needs them
+        # keyed by site, because it is handed a cluster after the fact and has to order
+        # members it never saw arrive.
+        self._alarm_at: dict[str, float] = {}
+        self._alarm_profile: dict[str, str] = {}
         self._apply_congestion()
 
     def _build_encroachment_risk(self) -> dict[str, float]:
@@ -294,6 +301,8 @@ class Simulation:
             incident.ai_risk_factors = risk.top_factors
             incident.ai_model_source = self.intelligence.model_source
             self._incident_by_tower[tower_id] = incident.id
+            self._alarm_at[tower_id] = self.t
+            self._alarm_profile[tower_id] = profile
             self._log(f"EDGE {tower_id} -> {state} after {latency:.1f}s "
                       f"({'; '.join(reasons) or 'threshold'})")
             self._log(f"IMPACT {incident.id}: {impact.subscribers:,} subscribers, "
@@ -302,8 +311,71 @@ class Simulation:
                       f"{impact.missed_subscribers:,} of them")
             self._log(f"LOCALISE {incident.id}: {localisation.cluster_id} -- "
                       f"{localisation.describe()}")
+            self._attribute(localisation)
             self._log(f"RISK {incident.id}: {risk.describe()} [{risk.model}]")
             self.dispatch.assign(self.t, incident)
+
+    def _attribute(self, localisation) -> None:
+        """Order a cluster by cause and relabel every open incident in it.
+
+        Runs over the whole cluster rather than only the alarm that just arrived,
+        because the verdict is retroactive: KL-03 is not "the source" of anything until
+        something downstream of it joins its cluster, and the incident raised for it two
+        minutes earlier has to be relabelled in place. Leaving it as it was would show a
+        dispatcher a stale card for the one site they are about to drive to.
+        """
+        members = localisation.members
+        if localisation.is_noise or len(members) < 2:
+            # ST-DBSCAN found no cascade at all. There is nothing to order, and asking
+            # the graph would only invite it to invent a chain from a single point.
+            self._set_role(members[0] if members else None, ROLE_SOLE, None, "", 0)
+            return
+
+        # Carry the cluster identity back to the members that alarmed earlier. The
+        # localiser is only asked about the alarm that just arrived, so without this
+        # KL-03 keeps the ISOLATED verdict it earned at t=180 when it really was alone,
+        # and its card reads "cluster ISOLATED" beside a ROOT CAUSE badge naming it the
+        # head of CL-001. The clusterer already computed the whole membership; this is
+        # only a matter of writing it where the rest of the system reads it.
+        for member in members:
+            incident_id = self._incident_by_tower.get(member)
+            if incident_id is None:
+                continue
+            incident = self.dispatch.incidents[incident_id]
+            incident.ai_cluster_id = localisation.cluster_id
+            incident.ai_cluster_members = list(members)
+            incident.ai_cluster_noise = False
+            incident.ai_cluster_span_m = localisation.span_m
+            incident.ai_cluster_span_s = localisation.span_s
+
+        verdict = self.intelligence.attribute(
+            localisation.cluster_id, members, self._alarm_at,
+            profiles=self._alarm_profile,
+        )
+        for member in members:
+            role = verdict.role_of(member)
+            self._set_role(member, role, verdict.source, verdict.reason,
+                           verdict.hops.get(member, 0))
+
+        if not verdict.attributed:
+            self._log(f"ROOT {verdict.cluster_id}: {verdict.describe()}")
+            return
+        tail = ", ".join(verdict.downstream)
+        self._log(f"ROOT {verdict.cluster_id}: {verdict.reason} -- "
+                  f"fix {verdict.source} first, {tail} clears with it")
+
+    def _set_role(self, tower_id, role: str, source, reason: str, hops: int) -> None:
+        """Write an attribution verdict onto a tower's open incident, if it has one."""
+        if tower_id is None:
+            return
+        incident_id = self._incident_by_tower.get(tower_id)
+        if incident_id is None:
+            return
+        incident = self.dispatch.incidents[incident_id]
+        incident.root_cause_role = role
+        incident.root_cause_id = source
+        incident.root_cause_reason = reason
+        incident.root_cause_hops = hops
 
     def _update_flooding(self) -> None:
         """Reprice flooded roads. Checked periodically, not every tick.
@@ -472,6 +544,8 @@ class Simulation:
                 # Drop the alarm from the clustering window too, or a resolved site
                 # keeps pulling later, unrelated faults into its cluster.
                 self.intelligence.release(tower_id)
+                self._alarm_at.pop(tower_id, None)
+                self._alarm_profile.pop(tower_id, None)
                 self._log(f"{tower_id} restored to service")
             self._incident_by_tower.pop(tower_id, None)
 
@@ -541,6 +615,13 @@ class Simulation:
                 "ai_risk_band": incident.ai_risk_band,
                 "ai_risk_factors": incident.ai_risk_factors,
                 "ai_model_source": incident.ai_model_source,
+                # getattr rather than attribute access: the guided demo restores pickled
+                # Simulation states, and one baked before these fields existed would
+                # otherwise raise here instead of simply reading as unattributed.
+                "root_cause_id": getattr(incident, "root_cause_id", None),
+                "root_cause_role": getattr(incident, "root_cause_role", "peer"),
+                "root_cause_reason": getattr(incident, "root_cause_reason", ""),
+                "root_cause_hops": getattr(incident, "root_cause_hops", 0),
             })
         incidents.sort(key=lambda i: -i["priority"])
 

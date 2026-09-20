@@ -28,6 +28,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from . import checkpoints
+from .rootcause import ROLE_DOWNSTREAM
 from .routing import DRY, RoadNetwork
 from .sim import Simulation, load_all
 
@@ -398,6 +399,54 @@ async def cascade(tower_id: str):
         "restoration_order": sim.world.asset_graph.restoration_order(impact.dark),
         "summary": impact.describe(),
     }
+
+
+@app.get("/api/rootcause")
+async def rootcause():
+    """Who is causing what, across every cluster currently open.
+
+    The sibling of ``/api/cascade/{tower_id}``, asked the other way round. Cascade is
+    hypothetical and forward-looking -- *if this site failed, what follows*. This one is
+    observational and backward-looking: given the alarms actually ringing, which of them
+    is the head and which are symptoms of it. A cluster with no dependency between its
+    members reports ``source: null`` rather than guessing, which is the whole point --
+    see :mod:`twinsync.rootcause`.
+    """
+    if engine.sim is None:
+        return JSONResponse({"error": "not ready"}, status_code=503)
+    sim = engine.sim
+
+    # Rebuild the member lists from the open incidents rather than re-running the
+    # clusterer: these are the verdicts the operator is actually looking at, and a fresh
+    # re-cluster here could disagree with the screen.
+    clusters: dict[str, list] = {}
+    for incident in sim.dispatch.incidents.values():
+        # ai_cluster_noise is ST-DBSCAN's ISOLATED verdict, and its cluster id is the
+        # literal string "ISOLATED" rather than a real group. Reporting those here would
+        # invent one single-member cluster per standalone fault.
+        if incident.resolved or not incident.ai_cluster_id or incident.ai_cluster_noise:
+            continue
+        clusters.setdefault(incident.ai_cluster_id, []).append(incident)
+
+    out = []
+    for cluster_id, incidents in sorted(clusters.items()):
+        members = sorted(i.tower_id for i in incidents)
+        source = next((i.root_cause_id for i in incidents if i.root_cause_id), None)
+        out.append({
+            "cluster": cluster_id,
+            "members": members,
+            "source": source,
+            "downstream": sorted(i.tower_id for i in incidents
+                                 if i.root_cause_role == ROLE_DOWNSTREAM),
+            "roles": {i.tower_id: i.root_cause_role for i in incidents},
+            "hops": {i.tower_id: i.root_cause_hops for i in incidents},
+            "reason": next((i.root_cause_reason for i in incidents
+                            if i.root_cause_reason), ""),
+            "symptoms": sum(1 for i in incidents
+                            if i.root_cause_role == ROLE_DOWNSTREAM),
+        })
+    return {"clusters": out,
+            "symptoms": sum(c["symptoms"] for c in out)}
 
 
 @app.get("/api/route")
