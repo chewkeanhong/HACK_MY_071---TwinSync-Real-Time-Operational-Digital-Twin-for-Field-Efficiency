@@ -84,6 +84,13 @@ class Engine:
             "buildings": buildings,
             "towers": towers,
             "subscribers": {b.id: b.subscribers for b in self.world.buildings},
+            # Per-site subscriber base: the buildings this tower actually reaches in
+            # 3D, not everything inside its radius. Static, because coverage is
+            # precomputed -- so it rides along here rather than in every digest.
+            "tower_subscribers": {
+                tower_id: self.coverage.subscribers_affected(entry.covered)
+                for tower_id, entry in self.coverage.by_tower.items()
+            },
             "critical": [b.id for b in self.world.buildings if b.critical],
             "centre": {"lon": sum(lons) / len(lons), "lat": sum(lats) / len(lats)},
             "scenario": self.scenario,

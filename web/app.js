@@ -751,9 +751,11 @@ function tooltip({object, layer}) {
     const p = object.properties;
     const st = state?.tower_status?.[p.id] || 'healthy';
     const d = state?.tower_digest?.[p.id];
+    const subs = world.tower_subscribers?.[p.id];
     return {html:
       `<b>${p.id} — ${p.name}</b><br>` +
       `antenna ${p.antenna_height.toFixed(0)} m · status <b>${st}</b>` +
+      (subs != null ? `<br>${fmt(subs)} subscribers in coverage` : '') +
       (d ? `<br>${d.throughput_mbps} Mbps · ${d.temperature_c}&deg;C · ${d.packet_loss_pct}% loss` : '') +
       (d && d.rainfall_mm_hr > 0.5
         ? `<br>rain ${d.rainfall_mm_hr} mm/hr · backhaul fade ${d.backhaul_fade_db} dB
