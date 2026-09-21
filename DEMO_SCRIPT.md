@@ -42,19 +42,46 @@ dispatcher that can never run out of vans never has to make the interesting deci
 |---|---|---|---|---|
 | 1 | 0:00 | 0 s | the extruded city on DEM terrain | "This is Kuala Lumpur's CBD as our twin sees it — not a flat map, a city with height." |
 | 2 | 0:05 | 45 s | uplink tile climbing past 98% | "Nothing is wrong yet. Notice what the network is *not* sending." |
-| 3 | 0:23 | 185 s | KL-03 goes amber, camera flies to it, **MTTD tile lights green** | "Act one. A rooftop amplifier starts cooking. The edge caught it in under three seconds — before a single customer called." |
+| 3 | 0:23 | 185 s | KL-03 goes amber, camera flies to it, **MTTD tile lights green** | "Act one. The backhaul saturates at KL-03 — a relay that KL-10, KL-12 and KL-13 all reach the network through. The edge caught it in under four seconds, before a single customer called." |
 | 4 | 0:30 | 245 s | **splits to Compare** | "Here is the whole argument. Same fault, same instant, two models of the world." |
-| 5 | 0:41 | 335 s | KL-13 fails, same cluster id `CL-001` | "A second site fails 290 m away. ST-DBSCAN folds it into the same journey." |
-| 6 | 0:53 | 430 s | truck-roll tile stays at 1 | "That saves a truck. It also makes the second job wait — and we report that too." |
-| 7 | 1:16 | 610 s | storm cell drifts in, weather tile turns amber | "Act three. A convective cell crosses the CBD. Rain fade on the 18 GHz backhaul." |
-| 8 | 1:28 | 710 s | KL-09 fails, tagged `ISOLATED`; second van rolls | "The clustering says this one is on its own. That is a real decision, not a sticker." |
+| 5 | 0:41 | 335 s | KL-13 alarms; `CL-001`; **amber link KL-03→KL-13**, ROOT CAUSE badge on KL-03, "↓ KL-03" on KL-13 | "This is not a second fault. It is the first one, arriving downstream — KL-03 is KL-13's feed. Clustering says they are one incident; the asset graph says which end to start at." |
+| 6 | 0:53 | 430 s | truck-roll tile stays at 1 | "One van covers both — and it starts at the end of the chain that actually needs fixing." |
+| 7 | 1:16 | 610 s | storm cell enters upwind, weather tile turns amber | "Act three. A storm cell moves in — and it gets worse for the rest of the run." |
+| 8 | 1:28 | 710 s | KL-09 fails, tagged `ISOLATED`; no ROOT line; second van rolls | "Same fault type as act one, a kilometre away — and the clustering keeps it separate. No cause named here, and a second van goes out." |
 | 9 | 1:41 | 815 s | **Compare** — 40 buildings against the flat map's 3 | "The flat map is not alarming. It is *reassuring* — and that is worse." |
 | 10 | 2:02 | 980 s | cyan flooded segments, routes redraw | "This is where the fusion changes something. Watch the cyan segments and the crew routes." |
-| 11 | 2:24 | 1155 s | KL-06 goes dark — four sites down | "A fourth site. Hold that thought and look at the comparison." |
+| 11 | 2:24 | 1155 s | KL-06 goes dark — four sites down | "A fourth site goes dark. Now look at what the two models say about it." |
 | 12 | 2:30 | 1200 s | **Compare** — 3 vs 47 buildings, 9,023 missed | "Nine thousand and twenty-three people the flat map is quietly confident are fine." |
-| 13 | 2:38 | 1270 s | KL-07 fails, the **last van rolls** | "A fifth site, and the last crew goes out. The fleet is now fully committed — remember that." |
+| 13 | 2:38 | 1270 s | KL-07 fails, the **last van rolls** | "A fifth site, and the last crew rolls. Every van is now out." |
 | 14 | 2:57 | 1420 s | KL-04 dark, a crew is **pulled off its job** mid-route | "And now the one that changes the shape of the day. Watch a crew get pulled off its job." |
 | 15 | 3:10 | 1520 s | **Compare** — 134 vs 71 buildings | "The gap does not close as it gets worse. It widens." |
+
+**Beat 5 is the chain reaction, and the claim is narrower than it looks.** KL-03 is
+KL-13's **primary parent** in the transport graph, 290 m away — the dependency is
+derived in `twinsync/world.py`, not authored for the demo, and `tests/test_rootcause.py`
+pins it so a re-derivation cannot quietly break the narration. The log line to point at:
+
+```
+LOCALISE INC-002: CL-001 -- 2 sites within 301 m over 148 s
+ROOT CL-001: KL-03 (backhaul_congestion) is the head, upstream of every other alarm
+  here: KL-13 sits on its primary feed -- fix KL-03 first, KL-13 clears with it
+```
+
+Two findings, from two different structures. ST-DBSCAN groups alarms in space and time;
+it cannot say which one caused the other, because its neighbour test is symmetric. The
+direction comes from the asset graph: who feeds whom, and who alarmed first. Both point
+at KL-03. If asked "isn't that just clustering?", that is the answer.
+
+**Do not claim the truck roll here.** The van was already saved by batching on distance,
+and the truck-roll tile would read 1 without any of this. What attribution adds is the
+*order*: a crew that starts at KL-13 repairs a site that was never broken. Say that
+instead.
+
+**It also declines, and that is worth ten seconds.** Beat 8's KL-09 is the same fault
+type as KL-03 and still comes back `ISOLATED`, because it is a kilometre away. No
+cluster, so no head is named and the card carries no source. Two separate ways of
+reporting nothing to add: ST-DBSCAN's noise label, and `source: null` when no member of
+a cluster feeds another.
 
 **Beat 12 is the headline, and it is a narrow window.** 47 buildings / 9,026 subscribers
 against the flat model's 3 is true only while exactly four sites are down — the 100
@@ -138,10 +165,10 @@ work whether or not the guided demo is running — `W` is the one to reach for i
 the flood story on demand rather than waiting for beat 10.
 
 **The MTTD tile.** Do not click it, just point at it on beat 3. It reads the live run's
-own mean detection latency, so it agrees with the "after 2.8 s" line in the log beside
+own mean detection latency, so it agrees with the "after 3.6 s" line in the log beside
 it, and its note carries the comparison that matters: 10.0 min reactive against seconds
 on the edge. Before the first fault it falls back to the committed A/B figure, so it is
-never blank. Per fault this run detects in 2.8 s, 5.8 s, 0.8 s, 0.6 s, 1.2 s and 0.6 s;
+never blank. Per fault this run detects in 3.6 s, 2.0 s, 0.8 s, 0.6 s, 1.2 s and 0.6 s;
 the A/B table's 0.7 s is the mean over the two incidents that also ran to repair, which
 is a narrower population and says so.
 

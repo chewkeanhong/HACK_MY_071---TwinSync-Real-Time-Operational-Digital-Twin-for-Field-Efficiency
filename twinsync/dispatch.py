@@ -66,6 +66,15 @@ class Incident:
     ai_risk_score: float = 0.0
     ai_risk_band: str = "low"
     ai_risk_factors: list[dict] = field(default_factory=list)
+    # Where this incident sits in its cluster's causal chain. ST-DBSCAN says these
+    # alarms are one incident; the asset graph says which of them is the head. A
+    # "downstream" incident is a symptom of root_cause_id and needs no van of its own --
+    # see twinsync.rootcause. "sole" means a head with nothing under it, "peer" means
+    # the cluster had no dependency and this really is its own job.
+    root_cause_id: str | None = None
+    root_cause_role: str = "peer"
+    root_cause_reason: str = ""
+    root_cause_hops: int = 0
     # "none" until a model has actually scored this incident. The baseline arm runs no
     # localiser and no risk model at all, and its incidents must not carry a model tag
     # implying otherwise -- that would quietly credit the A/B's control group with the

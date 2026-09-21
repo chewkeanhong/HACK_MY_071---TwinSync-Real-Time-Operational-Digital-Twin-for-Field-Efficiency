@@ -22,10 +22,11 @@ not a trained model.
 from __future__ import annotations
 
 from twinsync.risk import HEURISTIC_MODEL, RiskResult, RiskScorer
+from twinsync.rootcause import Attribution, attribute
 from twinsync.stdbscan import AlarmClusterer, LocalisationResult
 from twinsync.world import World
 
-__all__ = ["IntelligenceLayer", "LocalisationResult", "RiskResult"]
+__all__ = ["IntelligenceLayer", "LocalisationResult", "RiskResult", "Attribution"]
 
 
 class IntelligenceLayer:
@@ -46,6 +47,21 @@ class IntelligenceLayer:
     def release(self, tower_id: str) -> None:
         """Forget a tower's alarm once its incident is closed."""
         self.clusterer.forget(tower_id)
+
+    # -- attribution -----------------------------------------------------
+
+    def attribute(self, cluster_id: str, members, alarm_times: dict[str, float],
+                  *, profiles: dict[str, str] | None = None) -> Attribution:
+        """Name the head of a cluster the localiser has already grouped.
+
+        Deliberately a separate call rather than something ``localise`` returns. The two
+        answer different questions off different structures -- ST-DBSCAN groups alarms
+        in space and time, the asset graph orders them by dependency -- and folding them
+        together would hide that the second one can decline (see
+        :mod:`twinsync.rootcause`).
+        """
+        return attribute(self.world.asset_graph, cluster_id, members, alarm_times,
+                         profiles=profiles)
 
     # -- risk ------------------------------------------------------------
 

@@ -17,6 +17,9 @@
   --good:      #3fb950;
   --warn:      #d29922;
   --crit:      #f85149;
+  /* Root-cause amber. Must stay in step with C.linkCausal in web/app.js, or the
+     incident card and the link drawn on the map disagree about the same chain. */
+  --causal:    #ec9e3e;
   --route:     #58a6ff;
 
   --mono: ui-monospace, "SF Mono", "Cascadia Mono", Menlo, Consolas, monospace;
@@ -191,6 +194,12 @@ button.on { color: var(--bg); background: var(--ink); border-color: var(--ink); 
 .inc-2d { margin-top: 3px; font-size: 10px; color: var(--warn); font-style: italic; }
 .inc-sla  { margin-top: 3px; font-size: 10px; color: var(--ink-3); }
 .inc-sla.breach { color: var(--crit); }
+/* The attribution verdict. Deliberately the loudest row on the card: it is the one
+   line that changes what the dispatcher does with the ticket. */
+.inc-root { margin-top: 4px; font-size: 10px; font-family: var(--mono);
+            border-radius: 4px; padding: 2px 5px; }
+.inc-root.source     { color: #12161f; background: var(--causal); font-weight: 600; }
+.inc-root.downstream { color: var(--causal); background: rgba(236,158,62,0.13); }
 
 /* crews */
 .crewlist { padding: 7px 9px 9px; display: flex; flex-direction: column; gap: 5px; }
@@ -207,6 +216,7 @@ button.on { color: var(--bg); background: var(--ink); border-color: var(--ink); 
 .log .t { color: var(--ink-3); margin-right: 6px; }
 .log .edge   { color: var(--warn); }
 .log .impact { color: var(--crit); }
+.log .root   { color: var(--causal); }
 .log .ok     { color: var(--good); }
 
 /* ------------------------------------------------------------------ legend */

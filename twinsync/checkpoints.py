@@ -48,6 +48,7 @@ FINGERPRINT_SOURCES = (
     "twinsync/priority.py",
     "twinsync/risk.py",
     "twinsync/stdbscan.py",
+    "twinsync/rootcause.py",
     "twinsync/checkpoints.py",
     "edge/detector.py",
     "edge/telemetry.py",

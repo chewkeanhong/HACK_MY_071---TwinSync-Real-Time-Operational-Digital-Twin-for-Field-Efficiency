@@ -1,0 +1,7 @@
+# Model artifacts are parsed byte-for-byte; never let autocrlf rewrite them.
+# LightGBM's text format fails with "expect a tree here" if lines end in CRLF.
+models/*.txt   -text
+models/*.onnx  binary
+models/*.png   binary
+data/*.geojson -text
+data/*.json    -text

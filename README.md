@@ -140,10 +140,10 @@ but it is a trade and not a saving, and reporting it as a saving would be a lie 
 figures would catch.
 
 **MTTD is measured over resolved incidents only**, which is why it reads 0.7 s rather
-than the 2.8 s the log shows for KL-03: MTTD, MTTL and MTTR are a matched set describing
+than the 3.6 s the log shows for KL-03: MTTD, MTTL and MTTR are a matched set describing
 incidents that ran their full course. The live dashboard tile averages *every* fault it
 has seen, so it agrees with the log lines beside it. Per fault, the edge detected in
-0.6 s, 0.6 s, 0.8 s, 1.2 s, 2.8 s and 5.8 s.
+0.6 s, 0.6 s, 0.8 s, 1.2 s, 2.0 s and 3.6 s.
 
 ### What that is worth at network scale
 
@@ -401,12 +401,21 @@ The cascade to narrate, end to end:
 
 `storm drifts in → rain fade degrades backhaul → edge ONNX confirms the anomaly →
 ST-DBSCAN groups nearby alarms into one cluster and marks the unrelated one isolated →
-LightGBM re-scores with rainfall as a live feature → flooded roads reprice → dispatch
-reroutes and preempts`
+the asset graph names which member of that cluster is the head and which are symptoms of
+it → LightGBM re-scores with rainfall as a live feature → flooded roads reprice →
+dispatch reroutes and preempts`
 
 Trigger two nearby towers inside the 10-minute window and they share a cluster id;
 trigger a distant one and it comes back `ISOLATED`. That contrast is the clearest
 one-click proof the clustering is real rather than a label generator.
+
+Trigger a site and then one it feeds, and a `ROOT` line names the first as the source
+and draws the link between them in amber. Clustering cannot do this on its own —
+DBSCAN's neighbour relation is symmetric by construction, so it can say two alarms are
+one incident and never which caused the other. The direction comes from
+`twinsync/rootcause.py`, which ranks the cluster on who feeds whom and who alarmed
+first, and returns `source: null` rather than guessing when no member feeds another.
+`GET /api/rootcause` returns the same verdict for every open cluster.
 
 ![A fault against the extruded city](docs/shots/readme-3d.png)
 

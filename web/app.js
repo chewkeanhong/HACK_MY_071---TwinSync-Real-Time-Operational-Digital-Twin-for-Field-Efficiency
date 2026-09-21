@@ -34,7 +34,47 @@ const C = {
   linkPrimary:  [92, 158, 168],
   linkProtect:  [104, 116, 148],
   linkSevered:  [198, 72, 78],
+  linkCausal:   [236, 158, 62],
 };
+
+/* The causal chain currently attributed, read off the open incidents.
+ *
+ * Returns the source sites, the downstream ones, and the links the failure travelled
+ * along. ST-DBSCAN grouped these alarms; the asset graph decided which way the arrow
+ * points (twinsync/rootcause.py). Drawing it is the difference between an operator
+ * seeing two red dots and seeing one fault with a symptom hanging off it.
+ *
+ * A downstream site more than one hop from its source has no direct edge to draw, so we
+ * fall back to the primary feed it depends on -- that is the hop the failure arrived on,
+ * which is the one the operator needs to see. */
+function causalChain() {
+  const sources = new Set();
+  const downstream = new Map();     // tower -> the site that caused it
+  for (const i of state?.incidents || []) {
+    if (i.root_cause_role === 'downstream' && i.root_cause_id) {
+      downstream.set(i.tower, i.root_cause_id);
+      sources.add(i.root_cause_id);
+    }
+  }
+  const edges = new Set();
+  if (downstream.size) {
+    const links = world?.asset_graph?.links || [];
+    for (const [tower, src] of downstream) {
+      const direct = links.find((l) => l.from === src && l.to === tower);
+      const feed = direct || links.find((l) => l.to === tower && l.role === 'primary');
+      if (feed) edges.add(`${feed.from}>${feed.to}`);
+    }
+  }
+  return {sources, downstream, edges};
+}
+
+/* ASCII plus the one arrow the downstream labels use. Stated outright rather than left
+ * to `characterSet: 'auto'`, which this vendored deck.gl build predates: its default
+ * atlas is ASCII only, so the arrow would render as an empty box. */
+const DOWN_ARROW_CHARSET = [
+  '\u2193',
+  ...Array.from({length: 95}, (_, n) => String.fromCharCode(32 + n)),
+];
 
 /* Depth at which a service van stops being a vehicle -- mirrors IMPASSABLE_DEPTH_M in
  * twinsync/routing.py. Kept in sync by eye, which is fine for a colour ramp: being a
@@ -435,6 +475,7 @@ function paneLayers(mode) {
   // The hop each site depends on to reach a hub. Radio coverage is only half of why a
   // site goes dark; this is the other half, and until now it was invisible.
   const links = world?.asset_graph?.links || [];
+  const chain = causalChain();
   if (links.length && showLinks) {
     const severed = new Set(
       (state?.cascade?.severed_links || []).map((pair) => pair.join('>')));
@@ -454,6 +495,82 @@ function paneLayers(mode) {
       parameters: {depthTest: false},
       updateTriggers: {getColor: [state?.t]},
       pickable: true,
+    }));
+  }
+
+  // -- the chain the failure travelled ---------------------------------
+  //
+  // Its own layer rather than a colour on the topology overlay above, for two reasons.
+  // A causal link is *always* severed -- its source has failed, by definition -- so it
+  // could never win that layer's colour test. And drawn between the antenna tops rather
+  // than along the ground it reads as what it is: an arrow from the site at fault to the
+  // site complaining about it, above the buildings that hide the ground-level hops.
+  if (chain.edges.size) {
+    const top = {};
+    for (const f of towers) {
+      top[f.properties.id] = flat
+        ? f.geometry.coordinates
+        : [...f.geometry.coordinates, f.properties.antenna_height];
+    }
+    const causal = [...chain.edges]
+      .map((key) => key.split('>'))
+      .filter(([from, to]) => top[from] && top[to])
+      .map(([from, to]) => ({from, to, path: [top[from], top[to]]}));
+    if (causal.length) {
+      layers.push(new PathLayer({
+        id: p('root-cause-link'),
+        data: causal,
+        getPath: (d) => d.path,
+        getColor: [...C.linkCausal, 255],
+        getWidth: 4,
+        widthMinPixels: 3,
+        parameters: {depthTest: false},
+        updateTriggers: {getColor: [state?.t]},
+      }));
+    }
+  }
+
+  // -- the head of the chain -------------------------------------------
+  //
+  // A ring, not a fill: the tower head underneath still has to read its own status
+  // colour. This says "of the sites alarming, go to this one" and nothing else.
+  if (chain.sources.size) {
+    layers.push(new ScatterplotLayer({
+      id: p('root-cause-ring'),
+      data: towers.filter((f) => chain.sources.has(f.properties.id)),
+      billboard: true,
+      radiusUnits: 'pixels',
+      getPosition: (f) => (flat
+        ? f.geometry.coordinates
+        : [...f.geometry.coordinates, f.properties.antenna_height]),
+      getRadius: 15,
+      filled: false,
+      stroked: true,
+      getLineColor: [...C.linkCausal, 255],
+      lineWidthUnits: 'pixels',
+      getLineWidth: 2.5,
+      parameters: {depthTest: false},
+      updateTriggers: {getLineColor: [state?.t]},
+    }));
+  }
+
+  // Downstream sites say what they are a symptom of, so the label answers "why is this
+  // one amber?" without a click.
+  if (chain.downstream.size) {
+    layers.push(new TextLayer({
+      id: p('root-cause-labels'),
+      data: towers.filter((f) => chain.downstream.has(f.properties.id)),
+      getPosition: (f) => (flat
+        ? f.geometry.coordinates
+        : [...f.geometry.coordinates, f.properties.antenna_height]),
+      getText: (f) => `\u2193 ${chain.downstream.get(f.properties.id)}`,
+      getSize: 10,
+      getColor: [...C.linkCausal, 255],
+      getPixelOffset: [0, 14],
+      fontFamily: 'ui-monospace, Menlo, Consolas, monospace',
+      characterSet: DOWN_ARROW_CHARSET,
+      parameters: {depthTest: false},
+      updateTriggers: {getText: [state?.t], getColor: [state?.t]},
     }));
   }
 
@@ -904,6 +1021,23 @@ function renderCascade(cascade) {
   el.classList.toggle('bad', isolated.length > 0 || onBattery.length > 0);
 }
 
+/* The attribution verdict on one incident card.
+ *
+ * Only says something when there is something to say: a 'peer' or 'sole' incident is an
+ * ordinary standalone job, and a row announcing that on every card in the queue would be
+ * noise the dispatcher learns to skip. */
+function rootCauseHtml(i) {
+  if (i.root_cause_role === 'source') {
+    return `<div class="inc-root source">ROOT CAUSE &mdash; fix here first</div>`;
+  }
+  if (i.root_cause_role === 'downstream' && i.root_cause_id) {
+    const hops = i.root_cause_hops === 1 ? 'on its feed' : `${i.root_cause_hops} hops down`;
+    return `<div class="inc-root downstream">&darr; symptom of ${i.root_cause_id}
+      (${hops}) &mdash; clears when ${i.root_cause_id} is fixed</div>`;
+  }
+  return '';
+}
+
 function renderIncidents() {
   const host = $('incidents');
   if (!state.incidents.length) {
@@ -933,6 +1067,7 @@ function renderIncidents() {
         ? `<div class="inc-2d">AI (${i.ai_model_source}): cluster ${i.ai_cluster_id}
              &middot; risk ${i.ai_risk_score.toFixed(1)} (${i.ai_risk_band})</div>`
         : ''}
+      ${rootCauseHtml(i)}
       <div class="inc-sla ${i.sla_minutes_left < 0 ? 'breach' : ''}">
         ${i.assigned_to ? i.assigned_to + ' assigned' : 'unassigned'} ·
         ${i.sla_minutes_left < 0
@@ -968,6 +1103,7 @@ function renderLog() {
     const div = document.createElement('div');
     let cls = '';
     if (e.message.startsWith('EDGE')) cls = 'edge';
+    else if (e.message.startsWith('ROOT')) cls = 'root';
     else if (e.message.startsWith('IMPACT')) cls = 'impact';
     else if (e.message.includes('restored')) cls = 'ok';
     div.innerHTML = `<span class="t">${clockText(e.t)}</span><span class="${cls}">${e.message}</span>`;
