@@ -125,7 +125,7 @@ README_SHOTS = {
 README_SHOT_GUARDS = {
     2: "amplifier",
     8: "elevation picks",
-    12: "gap holds",
+    12: "gap is significant",
 }
 
 
