@@ -54,8 +54,7 @@ while you set up — start the server a few minutes before you present. The reco
 image, resumes if interrupted, and is re-recorded automatically after the scenario or the
 simulation changes. In a container it is recorded afresh on each new container.
 `python scripts/bake_checkpoints.py` records it up front instead;
-`TWINSYNC_RECORD_CHECKPOINTS=0` turns the automatic recording off. See
-[DEMO_SCRIPT.md](DEMO_SCRIPT.md) for the beat-by-beat.
+`TWINSYNC_RECORD_CHECKPOINTS=0` turns the automatic recording off.
 
 **Runs entirely offline.** No map tiles, no CDN, no API keys — deck.gl is vendored, the
 roads are drawn from our own GeoJSON, the DEM grid, the Sentinel-2 NDVI bake and both

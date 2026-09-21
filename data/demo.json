@@ -1,6 +1,6 @@
 {
   "name": "TwinSync guided demo -- KL CBD, six acts",
-  "note": "Beats narrate the timeline already authored in scenario.json. Nothing here injects a fault or a storm: the scripted run is the source of truth, so the same keystroke gives the same demo every time. The chaos panel stays the manual override for questions asked off-script. Every figure quoted in a body below is read from the measured run rather than asserted -- DEMO_SCRIPT.md says where each one comes from.",
+  "note": "Beats narrate the timeline already authored in scenario.json. Nothing here injects a fault or a storm: the scripted run is the source of truth, so the same keystroke gives the same demo every time. The chaos panel stays the manual override for questions asked off-script. Every figure quoted in a body below is read from the measured run rather than asserted.",
   "speed": 8,
   "beats": [
     {
