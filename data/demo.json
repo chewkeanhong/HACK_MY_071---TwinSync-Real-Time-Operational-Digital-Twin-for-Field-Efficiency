@@ -1,6 +1,6 @@
 {
   "name": "TwinSync guided demo -- KL CBD, six acts",
-  "note": "Beats narrate the timeline already authored in scenario.json. Nothing here injects a fault or a storm: the scripted run is the source of truth, so the same keystroke gives the same demo every time. The chaos panel stays the manual override for questions asked off-script. Every figure quoted in a body below is read from the measured run rather than asserted -- DEMO_SCRIPT.md says where each one comes from.",
+  "note": "Beats narrate the timeline already authored in scenario.json. Nothing here injects a fault or a storm: the scripted run is the source of truth, so the same keystroke gives the same demo every time. The chaos panel stays the manual override for questions asked off-script. Every figure quoted in a body below is read from the measured run rather than asserted.",
   "speed": 8,
   "beats": [
     {
@@ -54,59 +54,43 @@
       "view": "3d"
     },
     {
-      "t_s": 610,
-      "tag": "act 3",
-      "title": "The monsoon arrives",
-      "body": "A convective cell enters from the north-east, 1.6 km across, tracking south-west over the CBD at 16 km/h. Right now it is barely registering — what matters is where it goes. It builds to 5 mm/hr by the next fault, 49 when the roads start going under, and 95 at its peak. ITU-R P.838 rain fade is applied to the 18 GHz backhaul underneath it; the 2.1 GHz access carrier is unaffected at these rates, so nothing drops off the coverage map from weather alone. The weather tile turns amber and starts counting.",
-      "say": "Act three. A storm cell moves in — and it gets worse for the rest of the run.",
-      "view": "3d"
-    },
-    {
-      "t_s": 710,
+      "t_s": 510,
       "tag": "act 3",
       "title": "A third fault — and it is unrelated",
-      "body": "KL-09 is 1,205 m from KL-03 and 1,015 m from KL-13 — both outside the 900 m radius — so ST-DBSCAN labels it ISOLATED rather than folding it into CL-001. Same fault type as KL-03, and it still stays out: matching in kind is not the same as being near. No cluster means no head to name, so the incident card carries no source — this one is its own job. It commits the second of four vans.",
-      "say": "Same fault type as act one, a kilometre away — and the clustering keeps it separate. No cause named here, and a second van goes out.",
+      "body": "KL-09 is 1,205 m from KL-03 and 1,015 m from KL-13 — both outside the 900 m radius — so ST-DBSCAN labels it ISOLATED rather than folding it into CL-001. It alarms 169 s after KL-13, well inside the ten-minute window, and carries the same fault type as KL-03 — and it still stays out, because distance is the only gate that separates them. No cluster means no head to name, so the incident card carries no source — this one is its own job. It commits the second of four vans.",
+      "say": "Act three. Same fault type as act one, a kilometre away — and the clustering keeps it separate. No cause named here, and a second van goes out.",
       "view": "3d",
       "focus": "KL-09"
     },
     {
-      "t_s": 815,
-      "tag": "the point",
-      "title": "The flat map says the next cell has them",
-      "body": "Three sites down. True line of sight says 40 buildings and 6,713 subscribers are off the air; the flat model says 3. It does not raise a false alarm — it concludes the neighbouring site is covering the rest, and it is wrong, because a 200 m tower stands in the way.",
-      "say": "The flat map is not alarming — it is reassuring, and that is worse.",
-      "view": "split"
+      "t_s": 610,
+      "tag": "act 3",
+      "title": "The monsoon arrives",
+      "body": "A convective cell enters from the north-east, 1.6 km across, tracking south-west over the CBD at 16 km/h. Right now it is barely registering — what matters is where it goes. It builds to 49 mm/hr by the time the roads start going under, 80 by the time the next site fails, and 95 at its peak. ITU-R P.838 rain fade is applied to the 18 GHz backhaul underneath it; the 2.1 GHz access carrier is unaffected at these rates, so nothing drops off the coverage map from weather alone. The weather tile turns amber and starts counting.",
+      "say": "And on top of it, the weather. A storm cell moves in — and it gets worse for the rest of the run.",
+      "view": "3d"
     },
     {
       "t_s": 980,
       "tag": "act 3",
-      "title": "Three sources, one decision",
-      "body": "The water is up. The DEM says which road segments sit in the bottom decile of elevation, the storm says where rain is falling now, and OSM says which of those are on a crew's route. Travel time reprices, A* reroutes, and the crew that was nearest stops being the crew that is fastest.",
-      "say": "This is where the fusion actually changes something — watch the cyan segments and the routes.",
+      "title": "Elevation picks the crew's route",
+      "body": "The water is up. The DEM knows which road segments sit in the bottom decile of elevation; the storm knows where rain is falling right now; OSM knows which of those are on a crew's route. Where all three agree, the segment is repriced 3.2× in the travel-time graph, so A* stops treating it as a shortcut and routes the van around it. From here every dispatch decision — which crew, which road, which ETA — is solved on that graph instead of a flat map, which is why the nearest van stops being the fastest one.",
+      "say": "This is where elevation stops being scenery — it picks the crew's route, and A* drives round the water. Watch the cyan segments.",
       "view": "3d"
     },
     {
       "t_s": 1155,
       "tag": "act 4",
-      "title": "Four sites dark",
-      "body": "KL-06 loses mains and the fourth site goes dark: KL-03, then KL-13, then KL-09, now KL-06. No single one of these did the damage on its own — what matters is the total across all four.",
-      "say": "A fourth site goes dark. Now look at what the two models say about it.",
+      "title": "Fourth site goes dark",
+      "body": "KL-06 loses mains and the fourth site goes dark: KL-03, then KL-13, then KL-09, now KL-06. No single one of these did the damage on its own — what matters is the total across all four, and this is the widest the gap gets. True line of sight says 47 buildings and 9,026 subscribers are off the air; the flat model says 3 buildings and 3 subscribers, missing 9,023 people — not by raising a false alarm, but by staying quiet. It holds only until KL-07 lands 95 s later.",
+      "say": "A fourth site goes dark. True line of sight says 47 buildings and 9,026 subscribers are off the air — the flat map says three.",
       "view": "3d",
       "focus": "KL-06"
     },
     {
-      "t_s": 1200,
-      "tag": "the point",
-      "title": "What the flat map never saw",
-      "body": "Four sites down. True line of sight says 47 buildings and 9,026 subscribers are off the air; the flat model says 3 buildings and 3 subscribers. It misses 9,023 people — not by raising a false alarm, but by staying quiet. Both arms are running the same scenario on the same seed, side by side.",
-      "say": "Nine thousand and twenty-three people the flat map is quietly confident are fine.",
-      "view": "split"
-    },
-    {
       "t_s": 1270,
       "tag": "act 5",
-      "title": "The fourth van goes out",
+      "title": "The last crew goes out",
       "body": "KL-07 fails: a small fault on a distant site, 909 m from every other faulted tower, so it neither batches onto an in-flight trip nor joins a cluster. Five sites dark now — 49 buildings and 9,700 subscribers against the flat model's 3. It takes the last van, and the fleet is fully committed.",
       "say": "A fifth site, and the last crew rolls. Every van is now out.",
       "view": "3d",

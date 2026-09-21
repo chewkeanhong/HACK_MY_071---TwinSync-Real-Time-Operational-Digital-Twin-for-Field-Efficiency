@@ -32,19 +32,19 @@
     "mttr_minutes": 28.9,
     "mttr_p50_minutes": 28.9,
     "mttr_p90_minutes": 29.3,
-    "mttd_minutes": 0.01,
-    "mttl_minutes": 0.01,
-    "mean_detection_minutes": 0.01,
+    "mttd_minutes": 0.02,
+    "mttl_minutes": 0.02,
+    "mean_detection_minutes": 0.02,
     "travel_km": 16.23,
     "fuel_litres": 1.79,
     "co2_kg": 4.78,
-    "crew_utilisation_pct": 77.2,
-    "sla_uptime_pct": 93.0955,
+    "crew_utilisation_pct": 78.4,
+    "sla_uptime_pct": 93.0954,
     "cost_myr": 2520.0,
     "truck_rolls": 6,
     "truck_rolls_saved": 1,
     "reassignments": 1,
-    "subscriber_minutes_lost": 2706039,
+    "subscriber_minutes_lost": 2706062,
     "subscribers_restored": 60112,
     "sla_breaches": 0,
     "raw_bytes": 64800000,
@@ -52,8 +52,8 @@
     "uplink_reduction": 0.9851
   },
   "mttr_improvement_pct": 28.1,
-  "mttd_improvement_pct": 99.9,
-  "subscriber_minutes_saved": 444983,
+  "mttd_improvement_pct": 99.8,
+  "subscriber_minutes_saved": 444961,
   "truck_rolls_avoided": 0,
   "km_saved": -3.83,
   "fuel_litres_saved": -0.42,
@@ -65,7 +65,7 @@
     "cost_saved_myr": 0.0,
     "km_saved": -1.2764908289236352,
     "co2_saved_kg": -0.3763094963666876,
-    "subscriber_minutes_saved": 148327.7555554208
+    "subscriber_minutes_saved": 148320.29666653182
   },
   "annualised": {
     "assumed_sites": 2000,
@@ -75,6 +75,6 @@
     "cost_saved_myr": 0,
     "km_saved": -10212,
     "co2_saved_tonnes": -3.01,
-    "subscriber_hours_saved": 19777034
+    "subscriber_hours_saved": 19776040
   }
 }
