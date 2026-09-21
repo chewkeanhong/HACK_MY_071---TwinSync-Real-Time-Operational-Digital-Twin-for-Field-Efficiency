@@ -115,15 +115,15 @@ edge inference). It is a controlled experiment, not a marketing claim.
 
 | metric | today | TwinSync |
 |---|---|---|
-| MTTD — detect | 10.0 min | **0.01 min** (0.7 s) |
-| MTTL — localise | n/a | **0.01 min** |
+| MTTD — detect | 10.0 min | **0.02 min** (0.9 s) |
+| MTTL — localise | n/a | **0.02 min** |
 | MTTR — restore (mean) | 40.3 min | **28.9 min** (−28 %) |
 | MTTR — p90 | 41.6 min | **29.3 min** |
 | truck rolls | 6 | **6** |
 | distance driven | 12.4 km | 16.2 km |
 | CO₂ | 3.7 kg | 4.8 kg |
-| crew utilisation | 62.7 % | **77.2 %** |
-| subscriber-minutes lost | 3,151,022 | **2,706,039** |
+| crew utilisation | 62.7 % | **78.4 %** |
+| subscriber-minutes lost | 3,151,022 | **2,706,062** |
 | SLA uptime | 91.960 % | **93.095 %** |
 | cost of truck rolls | RM 2,520 | **RM 2,520** |
 | edge uplink | 61.8 MiB raw | **943 KiB (−98.5 %)** |
@@ -139,11 +139,11 @@ dispatcher pulls a van off KL-03 mid-route, and KL-03 then needs its own trip la
 but it is a trade and not a saving, and reporting it as a saving would be a lie the fuel
 figures would catch.
 
-**MTTD is measured over resolved incidents only**, which is why it reads 0.7 s rather
+**MTTD is measured over resolved incidents only**, which is why it reads 0.9 s rather
 than the 3.6 s the log shows for KL-03: MTTD, MTTL and MTTR are a matched set describing
 incidents that ran their full course. The live dashboard tile averages *every* fault it
 has seen, so it agrees with the log lines beside it. Per fault, the edge detected in
-0.6 s, 0.6 s, 0.8 s, 1.2 s, 2.0 s and 3.6 s.
+0.6 s, 0.6 s, 1.2 s, 1.2 s, 2.0 s and 3.6 s.
 
 ### What that is worth at network scale
 
@@ -152,7 +152,7 @@ operator's network is arithmetic on top of it, and every step is stated because 
 step is arguable:
 
 ```
-measured per incident:  0.00 truck rolls · RM 0 · -1.28 km · 148,328 subscriber-minutes
+measured per incident:  0.00 truck rolls · RM 0 · -1.28 km · 148,320 subscriber-minutes
         × 2,000 sites  (assumption)
         × 4 faults/site/year  (assumption)
         = 8,000 incidents/year
@@ -164,7 +164,7 @@ measured per incident:  0.00 truck rolls · RM 0 · -1.28 km · 148,328 subscrib
 | cost avoided | **RM 0** |
 | distance not driven | -10,212 km |
 | CO₂ | -3.01 t |
-| subscriber-hours restored | 19,777,034 |
+| subscriber-hours restored | 19,776,040 |
 
 The bottom row is the claim. The top four are zero or negative and stay in the table
 because deleting them would make the projection dishonest: on this scenario TwinSync buys

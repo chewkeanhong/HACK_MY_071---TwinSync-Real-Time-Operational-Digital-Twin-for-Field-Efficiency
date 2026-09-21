@@ -49,8 +49,8 @@
     {
       "tower": "KL-09",
       "profile": "backhaul_congestion",
-      "start_s": 700.0,
-      "note": "Act 3: a third fault, too far from the first two in space and time to share a cause -- ST-DBSCAN labels it ISOLATED. It also commits the second of three vans, which is what leaves the fleet saturated by the time KL-04 lands."
+      "start_s": 500.0,
+      "note": "Act 3: a third fault, and the one where the clustering declines. It alarms 169 s after KL-13 -- well inside ST-DBSCAN's ten-minute window -- and carries the same backhaul_congestion profile as KL-03, so neither the time gate nor the fault family separates it. Only distance does: 1,205 m from KL-03 and 1,015 m from KL-13, against a 900 m radius. ISOLATED, no head named, no source on the card. It lands ahead of the storm cell so act 3 opens on a fault rather than on weather, and it commits the second of four vans, which is what leaves the fleet saturated by the time KL-04 lands."
     },
     {
       "tower": "KL-06",

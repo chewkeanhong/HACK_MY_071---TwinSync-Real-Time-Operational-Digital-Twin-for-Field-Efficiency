@@ -116,16 +116,16 @@ def distinct_colours(png_bytes: bytes, sample: int = 40) -> int:
 # wrong still into the README.
 README_SHOTS = {
     2: "readme-3d.png",         # a fault, seen against the extruded city
-    9: "readme-monsoon.png",    # DEM + storm + OSM repricing a route
-    11: "readme-compare.png",   # the money shot: four sites down, 47 vs 3
+    8: "readme-monsoon.png",    # DEM + storm + OSM repricing a route
+    12: "readme-compare.png",   # the closing Compare: six sites down, 134 vs 71
 }
 
 # What each aliased beat must be about, as a substring of its title. A caption reword is
 # fine; a beat landing somewhere else entirely is not.
 README_SHOT_GUARDS = {
     2: "amplifier",
-    9: "three sources",
-    11: "flat map never saw",
+    8: "elevation picks",
+    12: "gap holds",
 }
 
 

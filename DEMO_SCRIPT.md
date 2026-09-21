@@ -14,7 +14,7 @@ python scripts/verify_ui.py http://127.0.0.1:8000 shots/
 every fresh clone, since the recording is not committed — it records the jump points that
 let `‹ Prev` / `Next ›` move the scenario clock, which takes about eight minutes in the
 background. Beats unlock one at a time; the caption card shows
-`recording jumps 6/15` until it finishes, and the badge disappears when every beat is
+`recording jumps 6/13` until it finishes, and the badge disappears when every beat is
 ready. The demo itself plays normally throughout. To have it finished before the server
 even starts (the night before, say), run `python scripts/bake_checkpoints.py`.
 
@@ -46,15 +46,13 @@ dispatcher that can never run out of vans never has to make the interesting deci
 | 4 | 0:30 | 245 s | **splits to Compare** | "Here is the whole argument. Same fault, same instant, two models of the world." |
 | 5 | 0:41 | 335 s | KL-13 alarms; `CL-001`; **amber link KL-03→KL-13**, ROOT CAUSE badge on KL-03, "↓ KL-03" on KL-13 | "This is not a second fault. It is the first one, arriving downstream — KL-03 is KL-13's feed. Clustering says they are one incident; the asset graph says which end to start at." |
 | 6 | 0:53 | 430 s | truck-roll tile stays at 1 | "One van covers both — and it starts at the end of the chain that actually needs fixing." |
-| 7 | 1:16 | 610 s | storm cell enters upwind, weather tile turns amber | "Act three. A storm cell moves in — and it gets worse for the rest of the run." |
-| 8 | 1:28 | 710 s | KL-09 fails, tagged `ISOLATED`; no ROOT line; second van rolls | "Same fault type as act one, a kilometre away — and the clustering keeps it separate. No cause named here, and a second van goes out." |
-| 9 | 1:41 | 815 s | **Compare** — 40 buildings against the flat map's 3 | "The flat map is not alarming. It is *reassuring* — and that is worse." |
-| 10 | 2:02 | 980 s | cyan flooded segments, routes redraw | "This is where the fusion changes something. Watch the cyan segments and the crew routes." |
-| 11 | 2:24 | 1155 s | KL-06 goes dark — four sites down | "A fourth site goes dark. Now look at what the two models say about it." |
-| 12 | 2:30 | 1200 s | **Compare** — 3 vs 47 buildings, 9,023 missed | "Nine thousand and twenty-three people the flat map is quietly confident are fine." |
-| 13 | 2:38 | 1270 s | KL-07 fails, the **last van rolls** | "A fifth site, and the last crew rolls. Every van is now out." |
-| 14 | 2:57 | 1420 s | KL-04 dark, a crew is **pulled off its job** mid-route | "And now the one that changes the shape of the day. Watch a crew get pulled off its job." |
-| 15 | 3:10 | 1520 s | **Compare** — 134 vs 71 buildings | "The gap does not close as it gets worse. It widens." |
+| 7 | 1:03 | 510 s | KL-09 fails, tagged `ISOLATED`; no ROOT line; second van rolls | "Act three. Same fault type as act one, a kilometre away — and the clustering keeps it separate. No cause named here, and a second van goes out." |
+| 8 | 1:16 | 610 s | storm cell enters upwind, weather tile turns amber | "And on top of it, the weather. A storm cell moves in — and it gets worse for the rest of the run." |
+| 9 | 2:02 | 980 s | cyan flooded segments, routes redraw | "This is where elevation stops being scenery — it picks the crew's route, and A* drives round the water. Watch the cyan segments." |
+| 10 | 2:24 | 1155 s | KL-06 goes dark — four sites down, the widest gap of the run | "A fourth site goes dark. True line of sight says 47 buildings and 9,026 subscribers are off the air — the flat map says three." |
+| 11 | 2:38 | 1270 s | KL-07 fails, the **last van rolls** | "A fifth site, and the last crew rolls. Every van is now out." |
+| 12 | 2:57 | 1420 s | KL-04 dark, a crew is **pulled off its job** mid-route | "And now the one that changes the shape of the day. Watch a crew get pulled off its job." |
+| 13 | 3:10 | 1520 s | **Compare** — 134 vs 71 buildings | "The gap does not close as it gets worse. It widens." |
 
 **Beat 5 is the chain reaction, and the claim is narrower than it looks.** KL-03 is
 KL-13's **primary parent** in the transport graph, 290 m away — the dependency is
@@ -77,25 +75,28 @@ and the truck-roll tile would read 1 without any of this. What attribution adds 
 *order*: a crew that starts at KL-13 repairs a site that was never broken. Say that
 instead.
 
-**It also declines, and that is worth ten seconds.** Beat 8's KL-09 is the same fault
-type as KL-03 and still comes back `ISOLATED`, because it is a kilometre away. No
-cluster, so no head is named and the card carries no source. Two separate ways of
-reporting nothing to add: ST-DBSCAN's noise label, and `source: null` when no member of
-a cluster feeds another.
+**It also declines, and that is worth ten seconds.** Beat 7's KL-09 is the same fault
+type as KL-03 and still comes back `ISOLATED`, because it is a kilometre away. It alarms
+169 s after KL-13, well inside ST-DBSCAN's ten-minute window, so the space gate is doing
+all the work. No cluster, so no head is named and the card carries no source. Two
+separate ways of reporting nothing to add: ST-DBSCAN's noise label, and `source: null`
+when no member of a cluster feeds another.
 
-**Beat 12 is the headline, and it is a narrow window.** 47 buildings / 9,026 subscribers
-against the flat model's 3 is true only while exactly four sites are down — the 100
-seconds between KL-06 at t=1150 s and KL-07 at t=1250 s. Say the number there. If you
-drift late, beat 15 is still a gap worth showing, but it is 134 against 71 and the ratio
-is less brutal.
+**The headline number has no Compare beat of its own any more — beat 10 carries it.**
+47 buildings / 9,026 subscribers against the flat model's 3 is true only while exactly
+four sites are down, the 100 seconds between KL-06 at t=1150 s and KL-07 at t=1250 s.
+Beat 10 lands at t=1155 s, inside that window, so say the number there. If you want it on
+screen rather than spoken, press `3` for Compare while that card is up and the verdict bar
+reads it back. If you drift late, beat 13 is still a gap worth showing, but it is 134
+against 71 and the ratio is less brutal.
 
-**Beats 13 and 14 are one movement, so do not rush the gap between them.** Beat 13 is
+**Beats 11 and 12 are one movement, so do not rush the gap between them.** Beat 11 is
 housekeeping that matters: KL-07 is a deliberately small fault on a distant site — 909 m
 from every other faulted tower, so it neither batches onto an in-flight trip nor joins a
 cluster — and its only job in the scenario is to put the **fourth** van on the road. That
-is what makes beat 14 possible.
+is what makes beat 12 possible.
 
-**Beat 14 is the escalation the whole run sets up.** KL-04 carries 42,053 subscribers of
+**Beat 12 is the escalation the whole run sets up.** KL-04 carries 42,053 subscribers of
 its own plus two pieces of critical infrastructure, and the incident it raises covers
 53,399 subscribers across 134 buildings. It scores **144.2** on
 reach × severity × criticality × urgency, against 0.1 to 4.4 for everything already open.
@@ -137,8 +138,8 @@ what a presentation clicker sends.
 
 This is a real jump, not just a caption change: the map, the incident queue, the log and
 the clock all land on that beat together, so the number on the card is the number on
-screen. Press Next on beat 11 and the clock moves to t=1200 s with four sites dark and
-9,026 subscribers off the air. Press Prev and it goes back to t=1155 s. Each jump takes
+screen. Press Next on beat 9 and the clock moves to t=1155 s with four sites dark and
+9,026 subscribers off the air. Press Prev and it goes back to t=980 s. Each jump takes
 about a second, and the run **carries on from there** at the demo's 8× speed.
 
 Use it to skip ahead when you are short of time, or to go back and re-explain a beat you
@@ -162,14 +163,14 @@ generator:
 
 `S` injects a storm, `F` fails the selected site, `W` raises the water level. All three
 work whether or not the guided demo is running — `W` is the one to reach for if you want
-the flood story on demand rather than waiting for beat 10.
+the flood story on demand rather than waiting for beat 9.
 
 **The MTTD tile.** Do not click it, just point at it on beat 3. It reads the live run's
 own mean detection latency, so it agrees with the "after 3.6 s" line in the log beside
 it, and its note carries the comparison that matters: 10.0 min reactive against seconds
 on the edge. Before the first fault it falls back to the committed A/B figure, so it is
-never blank. Per fault this run detects in 3.6 s, 2.0 s, 0.8 s, 0.6 s, 1.2 s and 0.6 s;
-the A/B table's 0.7 s is the mean over the two incidents that also ran to repair, which
+never blank. Per fault this run detects in 3.6 s, 2.0 s, 1.2 s, 0.6 s, 1.2 s and 0.6 s;
+the A/B table's 0.9 s is the mean over the two incidents that also ran to repair, which
 is a narrower population and says so.
 
 ---
@@ -228,9 +229,9 @@ other real win is backhaul, down 98.5%.
 | captions stop advancing | press `→` to step to the next beat; if that does nothing, `D` twice restarts the track | keep talking; the scenario is still running underneath |
 | the socket drops | it reconnects itself in 1.5 s | "That's the twin reconnecting — the server owns the clock, so nothing is lost." |
 | the storm does not appear | press `S` | "Let me force one rather than wait for the script." |
-| no cyan roads by beat 10 | press `W` and drag the flood slider | "Let me put the water up by hand so you can see the reroute." |
+| no cyan roads by beat 9 | press `W` and drag the flood slider | "Let me put the water up by hand so you can see the reroute." |
 | ROI or MTTD tile reads "—" | `data/results.json` is missing; keep going | "That tile is the offline A/B run; the live numbers are all still here." |
-| `‹ Prev` / `Next ›` greyed out | read the badge: `recording jumps 6/15` means that beat is not recorded yet — wait, or narrate straight through. `jumps unavailable` means nothing is recording: restart the server | nothing; the demo runs start to finish without them |
+| `‹ Prev` / `Next ›` greyed out | read the badge: `recording jumps 6/13` means that beat is not recorded yet — wait, or narrate straight through. `jumps unavailable` means nothing is recording: restart the server | nothing; the demo runs start to finish without them |
 | you are running short | press `3` for Compare and read the verdict bar | the gap is the argument; you do not need the rest |
 
 The dashboard needs no network at all — deck.gl is vendored, the roads are our own
